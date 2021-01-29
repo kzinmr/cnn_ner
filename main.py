@@ -82,6 +82,29 @@ def download_dataset(data_dir: Union[str, Path]):
         if _download_data(url, file_path):
             print(f"{mode} data is successfully downloaded")
 
+class WordDropout(nn.Module):
+
+    """ copied from flair.nn
+    Implementation of word dropout. Randomly drops out entire words (or characters) in embedding space.
+    """
+
+    def __init__(self, dropout_rate=0.05, inplace=False):
+        super(WordDropout, self).__init__()
+        self.dropout_rate = dropout_rate
+        self.inplace = inplace
+
+    def forward(self, x):
+        if not self.training or not self.dropout_rate:
+            return x
+
+        m = x.data.new(x.size(0), x.size(1), 1).bernoulli_(1 - self.dropout_rate)
+
+        mask = torch.autograd.Variable(m, requires_grad=False)
+        return mask * x
+
+    def extra_repr(self):
+        inplace_str = ", inplace" if self.inplace else ""
+        return "p={}{}".format(self.dropout_rate, inplace_str)
 
 def log_sum_exp(vec, m_size):
     """
@@ -782,6 +805,7 @@ class WordSequence(nn.Module):
         lstm_layer: int = 3,
         batch_size: int = 32,
         dropout: float = 0.2,
+        word_dropout: float = 0.05,
         use_char: bool = True,
         use_idcnn: bool = False,
         use_bilstm: bool = False,
@@ -816,10 +840,12 @@ class WordSequence(nn.Module):
             self.input_size += char_hidden_dim
         self.hidden_dim = word_hidden_dim
         self.word_feature_extractor = word_feature_extractor
+        self.dropout_rate = dropout
+        self.word_dropout_rate = word_dropout
         if self.word_feature_extractor in {"GRU", "LSTM"}:
             # The LSTM takes word embeddings as inputs, and outputs hidden states
             # with dimensionality hidden_dim.
-            self.droplstm = nn.Dropout(dropout)
+            self.droplstm = nn.Dropout(self.dropout_rate)
             self.lstm_layer = lstm_layer
             self.bilstm_flag = use_bilstm
             if self.bilstm_flag:
@@ -844,6 +870,8 @@ class WordSequence(nn.Module):
                     bidirectional=self.bilstm_flag,
                 )
         else:  # elif self.word_feature_extractor == "CNN":
+            if self.word_dropout_rate > 0:
+                self.word_dropout = WordDropout(self.word_dropout_rate)            
             self.word2cnn = nn.Linear(self.input_size, self.hidden_dim)
             self.cnn_layer = cnn_layer
             print("CNN layer: ", self.cnn_layer)
@@ -871,12 +899,12 @@ class WordSequence(nn.Module):
                                 padding=pad_size,
                             )
                         )
-                        dcnn_drop.append(nn.Dropout(dropout))
+                        dcnn_drop.append(nn.Dropout(self.dropout_rate))
                         dcnn_batchnorm.append(nn.BatchNorm1d(self.hidden_dim))
                     self.dcnn_drop_list.append(dcnn_drop)
                     self.dcnn_batchnorm_list.append(dcnn_batchnorm)
                     self.cnn_list.append(dcnn)
-                    self.cnn_drop_list.append(nn.Dropout(dropout))
+                    self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                     self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
 
             else:
@@ -894,7 +922,7 @@ class WordSequence(nn.Module):
                             padding=pad_size,
                         )
                     )
-                    self.cnn_drop_list.append(nn.Dropout(dropout))
+                    self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                     self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
 
         # The linear layer that maps from hidden state space to tag space
@@ -1004,6 +1032,7 @@ class TokenClassificationModel(nn.Module):
         lstm_layers: int = 3,
         batch_size: int = 32,
         dropout: float = 0.2,
+        word_dropout: float = 0.05,
         use_char: bool = True,
         use_idcnn: bool = False,
         use_bilstm: bool = False,
@@ -1029,6 +1058,7 @@ class TokenClassificationModel(nn.Module):
             lstm_layers,
             batch_size,
             dropout,
+            word_dropout,
             use_char,
             use_idcnn,
             use_bilstm,
@@ -2031,8 +2061,8 @@ class TokenClassificationModule(pl.LightningModule):
             cnn_layer=4,
             cnn_kernel=5,
             batch_size=32,
-            learning_rate=0.015,
             dropout=0.2,
+            word_dropout=0.05,
             use_char=True,
             use_idcnn=False,
             use_bilstm=False,
@@ -2517,7 +2547,7 @@ class TokenClassificationModule(pl.LightningModule):
         )
         parser.add_argument(
             "--learning_rate",
-            default=1e-3,
+            default=0.015,
             type=float,
             help="The initial learning rate for Adam.",
         )
@@ -2648,6 +2678,8 @@ if __name__ == "__main__":
 
     Path(args.output_dir).mkdir(exist_ok=True)
 
+    args.delimiter = " "
+    args.is_bio = False
     if args.download:
         download_dataset(args.data_dir)
         args.delimiter = "\t"
