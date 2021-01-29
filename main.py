@@ -127,12 +127,13 @@ def log_sum_exp(vec, m_size):
 
 
 class CRF(nn.Module):
-    def __init__(self, tagset_size):
+    def __init__(self, tagset_size, gpu=False):
         super(CRF, self).__init__()
+        self.gpu = gpu
         print("build CRF...")
         self.START_TAG = -2
         self.STOP_TAG = -1
-        # self.gpu = gpu
+
         # Matrix of transition parameters.  Entry i,j is the score of transitioning from i to j.
         self.tagset_size = tagset_size
         # # We add 2 here, because of START_TAG and STOP_TAG
@@ -142,8 +143,8 @@ class CRF(nn.Module):
         init_transitions[self.STOP_TAG, :] = -10000.0
         init_transitions[:, 0] = -10000.0
         init_transitions[0, :] = -10000.0
-        # if self.gpu:
-        init_transitions = init_transitions.to(self.device)
+        if self.gpu:
+            init_transitions = init_transitions.cuda()
         self.transitions = nn.Parameter(init_transitions)
 
     def forward(self, feats, mask):
@@ -232,8 +233,8 @@ class CRF(nn.Module):
         )
         _, last_bp = torch.max(last_values, 1)
         pad_zero = autograd.Variable(torch.zeros(batch_size, tag_size)).long()
-        # if self.gpu:
-        pad_zero = pad_zero.to(self.device)
+        if self.gpu:
+            pad_zero = pad_zero.cuda()
         back_points.append(pad_zero)
         back_points = torch.cat(back_points).view(seq_len, batch_size, tag_size)
 
@@ -248,8 +249,8 @@ class CRF(nn.Module):
         back_points = back_points.transpose(1, 0).contiguous()
         ## decode from the end, padded position ids are 0, which will be filtered if following evaluation
         decode_idx = autograd.Variable(torch.LongTensor(seq_len, batch_size))
-        # if self.gpu:
-        decode_idx = decode_idx.to(self.device)
+        if self.gpu:
+            decode_idx = decode_idx.cuda()
         decode_idx[-1] = pointer.detach()
         for idx in range(len(back_points) - 2, -1, -1):
             pointer = torch.gather(
@@ -369,8 +370,8 @@ class CRF(nn.Module):
         end_bp = end_bp.transpose(2, 1)
         # end_bp: (batch, tag_size, nbest)
         pad_zero = autograd.Variable(torch.zeros(batch_size, tag_size, nbest)).long()
-        # if self.gpu:
-        pad_zero = pad_zero.to(self.device)
+        if self.gpu:
+            pad_zero = pad_zero.cuda()
         back_points.append(pad_zero)
         back_points = torch.cat(back_points).view(seq_len, batch_size, tag_size, nbest)
 
@@ -398,8 +399,8 @@ class CRF(nn.Module):
         ## back_points: (seq_len, batch, tag_size, nbest)
         ## decode from the end, padded position ids are 0, which will be filtered in following evaluation
         decode_idx = autograd.Variable(torch.LongTensor(seq_len, batch_size, nbest))
-        # if self.gpu:
-        decode_idx = decode_idx.to(self.device)
+        if self.gpu:
+            decode_idx = decode_idx.cuda()
         decode_idx[-1] = pointer.data.true_divide(nbest)
         # use old mask, let 0 means has token
         for idx in range(len(back_points) - 2, -1, -1):
@@ -508,8 +509,8 @@ class CRF(nn.Module):
         tag_size = scores.size(2)
         ## convert tag value into a new format, recorded label bigram information to index
         new_tags = autograd.Variable(torch.LongTensor(batch_size, seq_len))
-        # if self.gpu:
-        new_tags = new_tags.to(self.device)
+        if self.gpu:
+            new_tags = new_tags.cuda()
         for idx in range(seq_len):
             if idx == 0:
                 ## start -> first score
@@ -568,11 +569,11 @@ class CharCNN(nn.Module):
         hidden_dim,
         dropout,
         # pretrain_char_embedding=None,
-        # gpu=False,
+        gpu=False,
     ):
+        self.gpu=gpu
         super(CharCNN, self).__init__()
         print("build char sequence feature extractor: CNN ...")
-        # self.gpu = gpu
         self.hidden_dim = hidden_dim
         self.char_drop = nn.Dropout(dropout)
         self.char_embeddings = nn.Embedding(alphabet_size, embedding_dim)
@@ -587,10 +588,10 @@ class CharCNN(nn.Module):
         self.char_cnn = nn.Conv1d(
             embedding_dim, self.hidden_dim, kernel_size=3, padding=1
         )
-        # if self.gpu:
-        self.char_drop = self.char_drop.to(self.device)
-        self.char_embeddings = self.char_embeddings.to(self.device)
-        self.char_cnn = self.char_cnn.to(self.device)
+        if self.gpu:
+            self.char_drop = self.char_drop.cuda()
+            self.char_embeddings = self.char_embeddings.cuda()
+            self.char_cnn = self.char_cnn.cuda()
 
     def random_embedding(self, vocab_size, embedding_dim):
         pretrain_emb = np.empty([vocab_size, embedding_dim])
@@ -655,11 +656,11 @@ class WordRep(nn.Module):
         feature_alphabets: list = None,
         pretrain_feature_embeddings=None,
         pretrain_word_embedding=None,
-        # gpu: bool = False,
+        gpu: bool = False,
     ):
         super(WordRep, self).__init__()
         print("build word representation...")
-        # self.gpu = gpu
+        self.gpu = gpu
         self.use_char = use_char
         self.batch_size = batch_size
         self.char_hidden_dim = 0
@@ -673,7 +674,7 @@ class WordRep(nn.Module):
                 embedding_dim=self.char_embedding_dim,
                 hidden_dim=self.char_hidden_dim,
                 dropout=self.dropout,
-                # gpu=self.gpu,
+                gpu=self.gpu,
             )
             # elif data.char_feature_extractor == "LSTM":
             #     self.char_feature = CharBiLSTM(data.char_alphabet.size(), data.pretrain_char_embedding, self.char_embedding_dim, self.char_hidden_dim, data.HP_dropout, self.gpu)
@@ -724,11 +725,11 @@ class WordRep(nn.Module):
                         )
                     )
 
-        # if self.gpu:
-        self.drop = self.drop.to(self.device)
-        self.word_embedding = self.word_embedding.to(self.device)
-        for idx in range(self.feature_num):
-            self.feature_embeddings[idx] = self.feature_embeddings[idx].to(self.device)
+        if self.gpu:
+            self.drop = self.drop.cuda()
+            self.word_embedding = self.word_embedding.cuda()
+            for idx in range(self.feature_num):
+                self.feature_embeddings[idx] = self.feature_embeddings[idx].cuda()
 
     def random_embedding(self, vocab_size, embedding_dim):
         pretrain_emb = np.empty([vocab_size, embedding_dim])
@@ -810,13 +811,12 @@ class WordSequence(nn.Module):
         use_idcnn: bool = False,
         use_bilstm: bool = False,
         pretrain_word_embedding: Optional[np.array] = None,
-        # gpu: bool = False,
+        gpu: bool = False,
     ):
         super(WordSequence, self).__init__()
         print("build word sequence feature extractor: %s..." % (word_feature_extractor))
-        # self.gpu = gpu
         self.use_char = use_char
-
+        self.gpu = gpu
         self.wordrep = WordRep(
             word_alphabet_size=word_alphabet_size,
             char_alphabet_size=char_alphabet_size,
@@ -832,9 +832,8 @@ class WordSequence(nn.Module):
             # feature_alphabets: list = None,
             # pretrain_feature_embeddings: list = None,
             pretrain_word_embedding=pretrain_word_embedding,
-            # gpu=gpu,
+            gpu=gpu,
         )
-
         self.input_size = word_emb_dim
         if self.use_char:
             self.input_size += char_hidden_dim
@@ -928,28 +927,28 @@ class WordSequence(nn.Module):
         # The linear layer that maps from hidden state space to tag space
         self.hidden2tag = nn.Linear(self.hidden_dim, label_alphabet_size)
 
-        # if self.gpu:
-        self.hidden2tag = self.hidden2tag.to(self.device)
-        if self.word_feature_extractor == "CNN":
-            self.word2cnn = self.word2cnn.to(self.device)
-            # self.cnn = self.cnn.cuda()
-            for idx in range(self.cnn_layer):
-                if self.use_idcnn:
-                    for i, dilation in enumerate(self.dilations):
-                        self.cnn_list[idx][i] = self.cnn_list[idx][i].to(self.device)
-                        self.dcnn_drop_list[idx][i] = self.dcnn_drop_list[idx][
-                            i
-                        ].to(self.device)
-                        self.dcnn_batchnorm_list[idx][i] = self.dcnn_batchnorm_list[
-                            idx
-                        ][i].to(self.device)
-                else:
-                    self.cnn_list[idx] = self.cnn_list[idx].to(self.device)
-                self.cnn_drop_list[idx] = self.cnn_drop_list[idx].to(self.device)
-                self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].to(self.device)
-        else:
-            self.droplstm = self.droplstm.to(self.device)
-            self.lstm = self.lstm.to(self.device)
+        if self.gpu:
+            self.hidden2tag = self.hidden2tag.cuda()
+            if self.word_feature_extractor == "CNN":
+                self.word2cnn = self.word2cnn.cuda()
+                # self.cnn = self.cnn.cuda()
+                for idx in range(self.cnn_layer):
+                    if self.use_idcnn:
+                        for i, dilation in enumerate(self.dilations):
+                            self.cnn_list[idx][i] = self.cnn_list[idx][i].cuda()
+                            self.dcnn_drop_list[idx][i] = self.dcnn_drop_list[idx][
+                                i
+                            ].cuda()
+                            self.dcnn_batchnorm_list[idx][i] = self.dcnn_batchnorm_list[
+                                idx
+                            ][i].cuda()
+                    else:
+                        self.cnn_list[idx] = self.cnn_list[idx].cuda()
+                    self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
+                    self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].cuda()
+            else:
+                self.droplstm = self.droplstm.cuda()
+                self.lstm = self.lstm.cuda()
 
     def forward(
         self,
@@ -1042,7 +1041,7 @@ class TokenClassificationModel(nn.Module):
         gpu: bool = False,
     ):
         super(TokenClassificationModel, self).__init__()
-        # self.gpu = gpu
+        self.gpu = gpu
         ## add two more label for downlayer lstm, use original label size for CRF
         self.word_hidden = WordSequence(
             word_alphabet_size,
@@ -1063,11 +1062,11 @@ class TokenClassificationModel(nn.Module):
             use_idcnn,
             use_bilstm,
             pretrain_word_embedding,
-            # gpu,
+            gpu,
         )
         self.use_crf = use_crf
         if self.use_crf:
-            self.crf = CRF(label_alphabet_size)  # self.gpu)
+            self.crf = CRF(label_alphabet_size, self.gpu)
         self.average_batch = average_batch
 
     def calculate_loss(
