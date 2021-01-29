@@ -647,7 +647,6 @@ class WordRep(nn.Module):
         word_emb_dim: int = 256,
         char_emb_dim: int = 32,
         char_hidden_dim: int = 64,
-        batch_size: int = 32,
         dropout: float = 0.2,
         use_char: bool = True,
         # pretrain_char_embedding=None,
@@ -662,7 +661,6 @@ class WordRep(nn.Module):
         print("build word representation...")
         self.gpu = gpu
         self.use_char = use_char
-        self.batch_size = batch_size
         self.char_hidden_dim = 0
         self.char_all_feature = False
         if self.use_char:
@@ -804,7 +802,6 @@ class WordSequence(nn.Module):
         cnn_layer: int = 4,
         cnn_kernel: int = 5,
         lstm_layer: int = 3,
-        batch_size: int = 32,
         dropout: float = 0.2,
         word_dropout: float = 0.05,
         use_char: bool = True,
@@ -823,7 +820,6 @@ class WordSequence(nn.Module):
             word_emb_dim=word_emb_dim,
             char_emb_dim=char_emb_dim,
             char_hidden_dim=char_hidden_dim,
-            batch_size=batch_size,
             dropout=dropout,
             use_char=use_char,
             # pretrain_char_embedding=None,
@@ -1029,7 +1025,6 @@ class TokenClassificationModel(nn.Module):
         cnn_layer: int = 4,
         cnn_kernel: int = 5,
         lstm_layers: int = 3,
-        batch_size: int = 32,
         dropout: float = 0.2,
         word_dropout: float = 0.05,
         use_char: bool = True,
@@ -1055,7 +1050,6 @@ class TokenClassificationModel(nn.Module):
             cnn_layer,
             cnn_kernel,
             lstm_layers,
-            batch_size,
             dropout,
             word_dropout,
             use_char,
@@ -2064,7 +2058,6 @@ class TokenClassificationModule(pl.LightningModule):
             word_feature_extractor="CNN",
             cnn_layer=4,
             cnn_kernel=5,
-            batch_size=32,
             dropout=0.2,
             word_dropout=0.05,
             use_char=True,

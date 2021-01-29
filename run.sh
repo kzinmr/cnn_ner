@@ -4,7 +4,8 @@ python3 main.py \
 --config_path="/app/workspace/models/train.config" \
 --vocab_path="/app/workspace/models/" \
 --pretrain_embed_path="/app/workspace/models/word2vec.txt" \
---batch-size=32 \
+--train_batch_size=128 \
+--eval_batch_size=32 \
 --max-sent-length=250 \
 --number-normalized=True \
 --max_epochs=100 \
