@@ -1329,7 +1329,7 @@ class ExamplesBuilder:
         is_bio: bool = False,
     ):
         self.examples = self.read_conll03_file(data_dir, split, delimiter=delimiter, is_bio=is_bio)
-        print(len(self.examples[0].words))
+        print(f'0-th sentence length: {len(self.examples[0].words)}')
         print(self.examples[0].words[:10])
         print(self.examples[0].labels[:10])
         # exit(0)
@@ -1807,6 +1807,8 @@ class TokenClassificationDataModule(pl.LightningDataModule):
         self.show_data_summary()
 
     def build_alphabet(self, examples: List[InputExample]):
+        print('Building alphabet vocabulary...')
+        time_start = time.time()
         for ex in examples:
             for word in ex.words:
                 if self.number_normalized:
@@ -1822,6 +1824,9 @@ class TokenClassificationDataModule(pl.LightningDataModule):
             # for idx in range(self.feature_num):
             #     feat_idx = pairs[idx + 1].split("]", 1)[-1]
             #     self.feature_alphabets[idx].add(feat_idx)
+        time_finish = time.time()
+        timecost = time_finish - time_start
+        print(f'End: {timecost / 60.} min.')
 
     def show_data_summary(self):
 
@@ -2719,6 +2724,8 @@ if __name__ == "__main__":
                 with open(txt_path) as fp:
                     text = fp.read()
                     texts.append(text)
+            print(f'Start Prediction...')
+            time_start = time.time()
             dl = dm.get_prediction_dataloader(texts)
             # TODO: check dataloader properly works here (num_workers)
             prediction_batch = [
@@ -2727,6 +2734,9 @@ if __name__ == "__main__":
 
             content_list = [w for d in prediction_batch for w in d["input"]]
             decode_results = [l for d in prediction_batch for l in d["prediction"]]
+            time_finish = time.time()
+            timecost = time_finish - time_start
+            print(f'End: {timecost / 60.} min.')            
             # TODO: do alignment with original tokens
             outpath = Path(args.output_dir) / "result.txt"
             print(content_list[0])
