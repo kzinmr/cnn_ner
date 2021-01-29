@@ -10,5 +10,6 @@ python3 main.py \
 --max_epochs=100 \
 --output_dir="/app/workspace/output/" \
 --do_train \
+--gpus
 # --download
 # --model_path="/app/workspace/models/cnn.0.model" \
