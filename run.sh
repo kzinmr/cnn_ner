@@ -1,7 +1,7 @@
 
 python3 main.py \
 --data_dir="/app/workspace/data/" \
---config_path="/app/workspace/models/train.config.cnn" \
+--config_path="/app/workspace/models/train.config" \
 --vocab_path="/app/workspace/models/" \
 --pretrain_embed_path="/app/workspace/models/word2vec.txt" \
 --batch-size=32 \
