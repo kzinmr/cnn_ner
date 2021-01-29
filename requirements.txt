@@ -1,0 +1,11 @@
+pytorch_lightning==1.1.0
+seqeval
+requests
+mecab-python3
+ipadic
+tqdm
+pandas
+# sklearn_crfsuite
+# flair==0.6.1
+# jupyter
+# mlflow==1.12.1
