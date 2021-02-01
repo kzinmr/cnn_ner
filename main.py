@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import multiprocessing
 import os
 import sys
 import time
@@ -30,8 +31,6 @@ from seqeval.scheme import BILOU
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
-
-CHAR_PADDING_ID = 0
 
 ListStr = List[str]
 ListListStr = List[ListStr]
@@ -1568,6 +1567,8 @@ class TokenClassificationBatch:
             mask: (batch_size, max_sent_len)
         """
 
+        CHAR_PADDING_ID = 0
+
         self.word_seq_tensor: torch.Tensor
         self.feature_seq_tensors: List[torch.Tensor]
         self.word_seq_lengths: torch.Tensor
@@ -1655,7 +1656,6 @@ class TokenClassificationBatch:
         _, char_seq_recover = char_perm_idx.sort(0, descending=False)
         _, word_seq_recover = word_perm_idx.sort(0, descending=False)
 
-        # register
         self.word_seq_tensor = word_seq_tensor
         self.feature_seq_tensors = feature_seq_tensors
         self.word_seq_lengths = word_seq_lengths
@@ -1803,6 +1803,7 @@ class TokenClassificationDataModule(pl.LightningDataModule):
             print("     Test  instance number: {}".format(len(self.test_examples)))
             print("     Train BatchSize: {}".format(self.train_batch_size))
         print("     Eval BatchSize: {}".format(self.eval_batch_size))
+        print("     Cores: {}".format(multiprocessing.cpu_count()))
         print("++" * 50)
         sys.stdout.flush()
 
@@ -2296,7 +2297,8 @@ class TokenClassificationModule(pl.LightningModule):
         )
         recall = recall_score(target_list, preds_list, mode="strict", scheme=BILOU)
         f1 = f1_score(target_list, preds_list, mode="strict", scheme=BILOU)
-        return accuracy, precision, recall, f1
+        support = preds_list.shape[0]
+        return accuracy, precision, recall, f1, support
 
     def training_step(
         self, train_batch: TokenClassificationBatch, batch_idx
@@ -2321,12 +2323,13 @@ class TokenClassificationModule(pl.LightningModule):
     def validation_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
         # avg_loss = torch.stack([x["val_step_loss"] for x in outputs]).mean()
         # self.log("val_loss", avg_loss, sync_dist=True)
-        accuracy, precision, recall, f1 = self.eval_f1(outputs)
+        accuracy, precision, recall, f1, support = self.eval_f1(outputs)
 
         self.log("val_accuracy", accuracy)
         self.log("val_precision", precision)
         self.log("val_recall", recall)
         self.log("val_f1", f1)
+        self.log("val_support", support)
 
     def test_step(
         self, test_batch: TokenClassificationBatch, batch_idx
@@ -2341,12 +2344,13 @@ class TokenClassificationModule(pl.LightningModule):
         }
 
     def test_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
-        accuracy, precision, recall, f1 = self.eval_f1(outputs)
+        accuracy, precision, recall, f1, support = self.eval_f1(outputs)
 
         self.log("test_accuracy", accuracy)
         self.log("test_precision", precision)
         self.log("test_recall", recall)
         self.log("test_f1", f1)
+        self.log("test_support", support)
 
     def predict_step(
         self, test_batch: TokenClassificationBatch, batch_idx
@@ -2670,7 +2674,7 @@ if __name__ == "__main__":
 
             time_finish = time.time()
             timecost = time_finish - time_start
-            print(f"End: {timecost / 60.} min.")
+            print(f"End: {timecost} sec.")
             # TODO: do alignment with original tokens
             outpath = Path(args.output_dir) / "result.txt"
             print(content_list[0])
@@ -2686,14 +2690,10 @@ if __name__ == "__main__":
                             "{} {} {}\n".format(
                                 dm.dataset.fexamples[idx].words[idy],
                                 content_list[idx][idy],
-                                decode_results[idx][idy]
+                                decode_results[idx][idy],
                             )
                         )
-                    fout.write("\n")            
+                    fout.write("\n")
         else:
             print(f"no input file given: {datadir}")
             exit(0)
-
-    import multiprocessing
-
-    print(multiprocessing.cpu_count())
