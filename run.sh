@@ -6,6 +6,7 @@ python3 main.py \
 --pretrain_embed_path="/app/workspace/models/word2vec.txt" \
 --train_batch_size=128 \
 --eval_batch_size=64 \
+--num_workers=8 \
 --max-sent-length=250 \
 --number-normalized=True \
 --max_epochs=100 \
