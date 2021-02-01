@@ -1202,11 +1202,11 @@ class Alphabet:
                 return self.instances[0]
             # First index is occupied by the wildcard element.
             return None
-        try:
+        if index - 1 < len(self.instances):
             return self.instances[index - 1]
-        except IndexError:
+        else:
             print(
-                "WARNING:Alphabet get_instance ,unknown instance, return the first label."
+                f"WARNING:Alphabet index {index-1} is out of {len(self.instances)}, return the first label."
             )
             return self.instances[0]
 
