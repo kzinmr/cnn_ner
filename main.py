@@ -1985,9 +1985,7 @@ class TokenClassificationModule(pl.LightningModule):
             #     loaded_state = torch.load(self.model_path)
             # else:
             self.gpu = False
-            loaded_state = torch.load(
-                self.model_path, map_location=torch.device("cpu")
-            )
+            loaded_state = torch.load(self.model_path, map_location=torch.device("cpu"))
             params = self._load_params(self.config_path)
             print(f"Loaded params from {self.config_path}: {params}")
             assert (
@@ -2117,81 +2115,6 @@ class TokenClassificationModule(pl.LightningModule):
         )
         return pretrain_emb
 
-    def forward(
-        self,
-        word_inputs,
-        feature_inputs,
-        word_seq_lengths,
-        char_inputs,
-        char_seq_lengths,
-        char_seq_recover,
-        mask,
-    ):
-        return self.model.forward(
-            word_inputs,
-            feature_inputs,
-            word_seq_lengths,
-            char_inputs,
-            char_seq_lengths,
-            char_seq_recover,
-            mask,
-        )
-
-    def training_step(
-        self, train_batch: TokenClassificationBatch, batch_idx
-    ) -> Dict[str, torch.Tensor]:
-
-        word_inputs = train_batch.word_seq_tensor.to(self.device)
-        word_seq_lengths = train_batch.word_seq_lengths.to(self.device)
-        feature_inputs = [b.to(self.device) for b in train_batch.feature_seq_tensors]
-        char_inputs = train_batch.char_seq_tensor.to(self.device)
-        char_seq_lengths = train_batch.char_seq_lengths.to(self.device)
-        char_seq_recover = train_batch.char_seq_recover.to(self.device)
-        batch_label = train_batch.label_seq_tensor.to(self.device)
-        mask = train_batch.mask.to(self.device)
-
-        loss = self.model.calculate_loss(
-            word_inputs,
-            feature_inputs,
-            word_seq_lengths,
-            char_inputs,
-            char_seq_lengths,
-            char_seq_recover,
-            batch_label,
-            mask,
-        )
-        self.log("train_loss", loss, prog_bar=True)
-        # right, whole = predict_check(tag_seq, batch_label, mask, data.sentence_classification)
-        # self.log("acc: %s/%s=%.4f", (sample_loss, right, whole,(right+0.)/whole))
-        return {"loss": loss}
-
-    def validation_step(
-        self, val_batch: TokenClassificationBatch, batch_idx
-    ) -> Dict[str, torch.Tensor]:
-        word_inputs = val_batch.word_seq_tensor.to(self.device)
-        word_seq_lengths = val_batch.word_seq_lengths.to(self.device)
-        feature_inputs = [b.to(self.device) for b in val_batch.feature_seq_tensors]
-        char_inputs = val_batch.char_seq_tensor.to(self.device)
-        char_seq_lengths = val_batch.char_seq_lengths.to(self.device)
-        char_seq_recover = val_batch.char_seq_recover.to(self.device)
-        batch_label = val_batch.label_seq_tensor.to(self.device)
-        mask = val_batch.mask.to(self.device)
-        loss = self.model.calculate_loss(
-            word_inputs,
-            feature_inputs,
-            word_seq_lengths,
-            char_inputs,
-            char_seq_lengths,
-            char_seq_recover,
-            batch_label,
-            mask,
-        )
-        return {"val_step_loss": loss}
-
-    def validation_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
-        avg_loss = torch.stack([x["val_step_loss"] for x in outputs]).mean()
-        self.log("val_loss", avg_loss, sync_dist=True)
-
     def recover_word(self, word_variable, mask_variable, word_recover) -> ListListStr:
         """
         input:
@@ -2281,18 +2204,56 @@ class TokenClassificationModule(pl.LightningModule):
             pred_label.append(pred)
         return pred_label
 
-    def test_step(
-        self, test_batch: TokenClassificationBatch, batch_idx
-    ) -> Dict[str, torch.Tensor]:
-        word_inputs = test_batch.word_seq_tensor.to(self.device)
-        word_seq_lengths = test_batch.word_seq_lengths.to(self.device)
-        word_seq_recover = test_batch.word_seq_recover.to(self.device)
-        feature_inputs = [b.to(self.device) for b in test_batch.feature_seq_tensors]
-        char_inputs = test_batch.char_seq_tensor.to(self.device)
-        char_seq_lengths = test_batch.char_seq_lengths.to(self.device)
-        char_seq_recover = test_batch.char_seq_recover.to(self.device)
-        batch_label = test_batch.label_seq_tensor.to(self.device)
-        mask = test_batch.mask.to(self.device)
+    def forward(
+        self,
+        word_inputs,
+        feature_inputs,
+        word_seq_lengths,
+        char_inputs,
+        char_seq_lengths,
+        char_seq_recover,
+        mask,
+    ):
+        return self.model.forward(
+            word_inputs,
+            feature_inputs,
+            word_seq_lengths,
+            char_inputs,
+            char_seq_lengths,
+            char_seq_recover,
+            mask,
+        )
+
+    def calculate_loss(self, batch: TokenClassificationBatch):
+        word_inputs = batch.word_seq_tensor.to(self.device)
+        word_seq_lengths = batch.word_seq_lengths.to(self.device)
+        feature_inputs = [b.to(self.device) for b in batch.feature_seq_tensors]
+        char_inputs = batch.char_seq_tensor.to(self.device)
+        char_seq_lengths = batch.char_seq_lengths.to(self.device)
+        char_seq_recover = batch.char_seq_recover.to(self.device)
+        batch_label = batch.label_seq_tensor.to(self.device)
+        mask = batch.mask.to(self.device)
+        return self.model.calculate_loss(
+            word_inputs,
+            feature_inputs,
+            word_seq_lengths,
+            char_inputs,
+            char_seq_lengths,
+            char_seq_recover,
+            batch_label,
+            mask,
+        )
+
+    def predict(self, batch: TokenClassificationBatch):
+        word_inputs = batch.word_seq_tensor.to(self.device)
+        word_seq_lengths = batch.word_seq_lengths.to(self.device)
+        word_seq_recover = batch.word_seq_recover.to(self.device)
+        feature_inputs = [b.to(self.device) for b in batch.feature_seq_tensors]
+        char_inputs = batch.char_seq_tensor.to(self.device)
+        char_seq_lengths = batch.char_seq_lengths.to(self.device)
+        char_seq_recover = batch.char_seq_recover.to(self.device)
+        batch_label = batch.label_seq_tensor.to(self.device)
+        mask = batch.mask.to(self.device)
 
         if self.nbest > 1:
             scores, nbest_tag_seq = self.model.decode_nbest(
@@ -2321,26 +2282,68 @@ class TokenClassificationModule(pl.LightningModule):
                 # batch_label,
                 mask,
             )
-
+        words = self.recover_word(word_inputs, mask, word_seq_recover)
         pred_label, gold_label = self.recover_label(
             tag_seq, batch_label, mask, word_seq_recover
         )
-        return {
-            # "scores": pred_scores,
-            "target": gold_label,
-            "prediction": pred_label,
-        }
+        return words, pred_label, gold_label
 
-    def test_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
+    def eval_f1(self, outputs):
         preds_list = np.concatenate([x["prediction"] for x in outputs], axis=0)
         target_list = np.concatenate([x["target"] for x in outputs], axis=0)
-
         accuracy = accuracy_score(target_list, preds_list)
         precision = precision_score(
             target_list, preds_list, mode="strict", scheme=BILOU
         )
         recall = recall_score(target_list, preds_list, mode="strict", scheme=BILOU)
         f1 = f1_score(target_list, preds_list, mode="strict", scheme=BILOU)
+        return accuracy, precision, recall, f1
+
+    def training_step(
+        self, train_batch: TokenClassificationBatch, batch_idx
+    ) -> Dict[str, torch.Tensor]:
+        loss = self.calculate_loss(train_batch)
+        self.log("train_loss", loss, prog_bar=True)
+        # right, whole = predict_check(tag_seq, batch_label, mask, data.sentence_classification)
+        # self.log("acc: %s/%s=%.4f", (sample_loss, right, whole,(right+0.)/whole))
+        return {"loss": loss}
+
+    def validation_step(
+        self, val_batch: TokenClassificationBatch, batch_idx
+    ) -> Dict[str, torch.Tensor]:
+        words, pred_label, gold_label = self.predict(val_batch)
+
+        # return {"val_step_loss": loss}
+        return {
+            "target": gold_label,
+            "prediction": pred_label,
+        }
+
+    def validation_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
+        # avg_loss = torch.stack([x["val_step_loss"] for x in outputs]).mean()
+        # self.log("val_loss", avg_loss, sync_dist=True)
+        accuracy, precision, recall, f1 = self.eval_f1(outputs)
+
+        self.log("val_accuracy", accuracy)
+        self.log("val_precision", precision)
+        self.log("val_recall", recall)
+        self.log("val_f1", f1)
+
+    def test_step(
+        self, test_batch: TokenClassificationBatch, batch_idx
+    ) -> Dict[str, torch.Tensor]:
+        words, pred_label, gold_label = self.predict(test_batch)
+
+        return {
+            # "scores": pred_scores,
+            # "input": words,
+            "target": gold_label,
+            "prediction": pred_label,
+        }
+
+    def test_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
+        accuracy, precision, recall, f1 = self.eval_f1(outputs)
+
         self.log("test_accuracy", accuracy)
         self.log("test_precision", precision)
         self.log("test_recall", recall)
@@ -2437,7 +2440,7 @@ class TokenClassificationModule(pl.LightningModule):
                 min_lr=1e-5,
                 verbose=True,
             ),
-            "monitor": "val_loss",
+            "monitor": "val_f1",  # "val_loss",
         }
 
     def write_results(self, content_list, decode_results, pred_scores, decode_path):
@@ -2583,10 +2586,10 @@ def make_trainer(argparse_args: argparse.Namespace):
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=argparse_args.output_dir,
-        filename="checkpoint-{epoch}-{val_loss:.2f}",
+        filename="checkpoint-{epoch}-{val_f1:.2f}",
         save_top_k=10,
         verbose=True,
-        monitor="val_loss",  # F-value
+        monitor="val_f1",  # "val_loss",
         mode="min",
     )
     lr_logger = LearningRateMonitor(logging_interval="step")
