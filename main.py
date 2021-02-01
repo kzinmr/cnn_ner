@@ -2685,13 +2685,12 @@ if __name__ == "__main__":
     dm = TokenClassificationDataModule(args)
     dm.prepare_data()
 
-    model = TokenClassificationModule(args)
-
     if args.do_train:
         dm.setup(stage="fit")
         # mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
         # mlflow.set_experiment("cnn-ner")
         # mlflow.pytorch.autolog(log_every_n_epoch=1)
+        model = TokenClassificationModule(args)
         trainer, checkpoint_callback = make_trainer(args)
         trainer.fit(model, dm)
         # save best model
@@ -2710,6 +2709,8 @@ if __name__ == "__main__":
             new_model_path = Path(args.model_path).parent / "prediction_model.pt"
             save_path = model.output_dir.joinpath(new_model_path)
             args.model_path = str(new_model_path)
+        else:
+            model = TokenClassificationModule(args)
         datadir = Path(args.data_dir)
         if datadir.exists():
             texts = []
