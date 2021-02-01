@@ -1790,14 +1790,13 @@ class TokenClassificationDataModule(pl.LightningDataModule):
 
         print("++" * 50)
         print("DATA SUMMARY:")
-        print(" I/O:")
-        print("     Start   Sequence   Laebling   task...")
-        print("     Tag          scheme: BILOU")
+        print("    Start   Sequence   Laebling   task...")
+        print("    Tag          scheme: BILOU")
         # print("     Tag vocab: {}".format(self.label_alphabet.vocab()))
-        print("     MAX SENTENCE LENGTH: {}".format(self.tokens_per_batch))
-        print("     Word  alphabet size: {}".format(self.word_alphabet.size()))
-        print("     Char  alphabet size: {}".format(self.char_alphabet.size()))
-        print("     Label alphabet size: {}".format(self.label_alphabet.size()))
+        print("    MAX SENTENCE LENGTH: {}".format(self.tokens_per_batch))
+        print("    Word  alphabet size: {}".format(self.word_alphabet.size()))
+        print("    Char  alphabet size: {}".format(self.char_alphabet.size()))
+        print("    Label alphabet size: {}".format(self.label_alphabet.size()))
         if self.do_train:
             print("     Train instance number: {}".format(len(self.train_examples)))
             print("     Dev   instance number: {}".format(len(self.val_examples)))
@@ -2352,48 +2351,8 @@ class TokenClassificationModule(pl.LightningModule):
     def predict_step(
         self, test_batch: TokenClassificationBatch, batch_idx
     ) -> Dict[str, torch.Tensor]:
-        word_inputs = test_batch.word_seq_tensor.to(self.device)
-        word_seq_lengths = test_batch.word_seq_lengths.to(self.device)
-        word_seq_recover = test_batch.word_seq_recover.to(self.device)
-        feature_inputs = [b.to(self.device) for b in test_batch.feature_seq_tensors]
-        char_inputs = test_batch.char_seq_tensor.to(self.device)
-        char_seq_lengths = test_batch.char_seq_lengths.to(self.device)
-        char_seq_recover = test_batch.char_seq_recover.to(self.device)
-        batch_label = test_batch.label_seq_tensor.to(self.device)
-        mask = test_batch.mask.to(self.device)
+        words, pred_label, gold_label = self.predict(test_batch)
 
-        if self.nbest > 1:
-            scores, nbest_tag_seq = self.model.decode_nbest(
-                word_inputs,
-                feature_inputs,
-                word_seq_lengths,
-                char_inputs,
-                char_seq_lengths,
-                char_seq_recover,
-                mask,
-                self.nbest,
-            )
-            # nbest_pred_result = self.recover_nbest_label(
-            #     nbest_tag_seq, mask, word_seq_recover
-            # )
-            # pred_scores = scores[word_seq_recover].cpu().data.numpy().tolist()
-            tag_seq = nbest_tag_seq[:, :, 0]
-        else:
-            tag_seq = self.model.forward(
-                word_inputs,
-                feature_inputs,
-                word_seq_lengths,
-                char_inputs,
-                char_seq_lengths,
-                char_seq_recover,
-                # batch_label,
-                mask,
-            )
-
-        pred_label, gold_label = self.recover_label(
-            tag_seq, batch_label, mask, word_seq_recover
-        )
-        words = self.recover_word(word_inputs, mask, word_seq_recover)
         return {
             "input": words,
             "target": gold_label,
@@ -2706,6 +2665,8 @@ if __name__ == "__main__":
             ]
             content_list = [w for d in prediction_batch for w in d["input"]]
             decode_results = [l for d in prediction_batch for l in d["prediction"]]
+            print(len(content_list), len(decode_results))
+            print(len(dm.dataset), len(dm.dataset.fexamples))
 
             time_finish = time.time()
             timecost = time_finish - time_start
@@ -2714,7 +2675,21 @@ if __name__ == "__main__":
             outpath = Path(args.output_dir) / "result.txt"
             print(content_list[0])
             print(decode_results[0])
-            model.write_decoded_results(content_list, decode_results, outpath)
+            # model.write_decoded_results(content_list, decode_results, outpath)
+            sent_num = len(decode_results)
+            assert sent_num == len(content_list)
+            with open(outpath, "w") as fout:
+                for idx in range(sent_num):
+                    sent_length = len(decode_results[idx])
+                    for idy in range(sent_length):
+                        fout.write(
+                            "{} {} {}\n".format(
+                                dm.dataset.fexamples[idx].words[idy],
+                                content_list[idx][idy],
+                                decode_results[idx][idy]
+                            )
+                        )
+                    fout.write("\n")            
         else:
             print(f"no input file given: {datadir}")
             exit(0)
