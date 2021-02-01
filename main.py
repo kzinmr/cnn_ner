@@ -2654,6 +2654,7 @@ if __name__ == "__main__":
         if datadir.exists():
             if (datadir / "test.txt").exists():
                 dl = dm.test_dataloader()
+                fexamples = dm.test_dataset.fexamples
             else:
                 texts = []
                 for txt_path in datadir.glob("*.txt"):
@@ -2661,6 +2662,7 @@ if __name__ == "__main__":
                         text = fp.read()
                         texts.append(text)
                 dl = dm.get_prediction_dataloader(texts)
+                fexamples = dm.dataset.fexamples
 
             print(f"Start Prediction...")
             time_start = time.time()
@@ -2670,8 +2672,8 @@ if __name__ == "__main__":
             ]
             content_list = [w for d in prediction_batch for w in d["input"]]
             decode_results = [l for d in prediction_batch for l in d["prediction"]]
-            print(len(content_list), len(decode_results))
-            print(len(dm.dataset), len(dm.dataset.fexamples))
+            # print(len(content_list), len(decode_results))
+            # print(len(dm.dataset), len(dm.dataset.fexamples))
 
             time_finish = time.time()
             timecost = time_finish - time_start
@@ -2689,7 +2691,7 @@ if __name__ == "__main__":
                     for idy in range(sent_length):
                         fout.write(
                             "{} {} {}\n".format(
-                                dm.dataset.fexamples[idx].words[idy],
+                                fexamples[idx].words[idy],
                                 content_list[idx][idy],
                                 decode_results[idx][idy],
                             )
