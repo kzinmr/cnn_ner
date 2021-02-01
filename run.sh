@@ -10,8 +10,8 @@ python3 main.py \
 --number-normalized=True \
 --max_epochs=100 \
 --output_dir="/app/workspace/output/" \
---model_path="/app/workspace/cnn_pl_model/checkpoint-epoch=23-val_loss=305.48.ckpt" \
---do_predict
-# --gpus=1
+--model_path="/app/workspace/cnn_pl_model/checkpoint-epoch=41-val_loss=224.52.ckpt" \
+--do_train \
+--gpus=1
 # --download
-# --do_train \
+# --do_predict

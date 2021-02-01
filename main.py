@@ -2397,7 +2397,7 @@ class TokenClassificationModule(pl.LightningModule):
             "optimizer": self.optimizer,
             "lr_scheduler": ReduceLROnPlateau(
                 self.optimizer,
-                mode="min",
+                mode="max",  # "min",
                 factor=self.hparams.anneal_factor,
                 patience=self.hparams.patience,
                 min_lr=1e-5,
@@ -2553,7 +2553,7 @@ def make_trainer(argparse_args: argparse.Namespace):
         save_top_k=10,
         verbose=True,
         monitor="val_f1",  # "val_loss",
-        mode="min",
+        mode="max"  # "min",
     )
     lr_logger = LearningRateMonitor(logging_interval="step")
 
