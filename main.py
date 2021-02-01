@@ -4,34 +4,32 @@
 import argparse
 import json
 import os
-import random
 import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import MeCab
 import numpy as np
 import pytorch_lightning as pl
 import requests
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
-from seqeval.metrics import accuracy_score
-
-# from seqeval.metrics import classification_report as seqeval_classification_report
-from seqeval.metrics import f1_score, precision_score, recall_score
-from seqeval.scheme import BILOU
-
-# from sklearn_crfsuite import metrics as crfsuite_metrics
 import torch
 import torch.autograd as autograd
 import torch.nn as nn
 import torch.nn.functional as F
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from seqeval.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+)
+from seqeval.scheme import BILOU
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
-
 
 ListStr = List[str]
 ListListStr = List[ListStr]
@@ -82,9 +80,10 @@ def download_dataset(data_dir: Union[str, Path]):
         if _download_data(url, file_path):
             print(f"{mode} data is successfully downloaded")
 
+
 class WordDropout(nn.Module):
 
-    """ copied from flair.nn
+    """copied from flair.nn
     Implementation of word dropout. Randomly drops out entire words (or characters) in embedding space.
     """
 
@@ -105,6 +104,7 @@ class WordDropout(nn.Module):
     def extra_repr(self):
         inplace_str = ", inplace" if self.inplace else ""
         return "p={}{}".format(self.dropout_rate, inplace_str)
+
 
 def log_sum_exp(vec, m_size):
     """
@@ -571,7 +571,7 @@ class CharCNN(nn.Module):
         # pretrain_char_embedding=None,
         gpu=False,
     ):
-        self.gpu=gpu
+        self.gpu = gpu
         super(CharCNN, self).__init__()
         print("build char sequence feature extractor: CNN ...")
         self.hidden_dim = hidden_dim
@@ -866,7 +866,7 @@ class WordSequence(nn.Module):
                 )
         else:  # elif self.word_feature_extractor == "CNN":
             if self.word_dropout_rate > 0:
-                self.word_dropout = WordDropout(self.word_dropout_rate)            
+                self.word_dropout = WordDropout(self.word_dropout_rate)
             self.word2cnn = nn.Linear(self.input_size, self.hidden_dim)
             self.cnn_layer = cnn_layer
             print("CNN layer: ", self.cnn_layer)
@@ -1273,7 +1273,6 @@ class _Alphabet:
         if not self.label:
             self.add(self.UNKNOWN)
 
-
     def add(self, instance):
         if instance not in self.instance2index:
             self.instances.append(instance)
@@ -1312,7 +1311,6 @@ class _Alphabet:
         return len(self.instances) + 1
 
 
-
 class ExamplesBuilder:
     def __init__(
         self,
@@ -1321,8 +1319,10 @@ class ExamplesBuilder:
         delimiter: str = "\t",
         is_bio: bool = False,
     ):
-        self.examples = self.read_conll03_file(data_dir, split, delimiter=delimiter, is_bio=is_bio)
-        print(f'0-th sentence length: {len(self.examples[0].words)}')
+        self.examples = self.read_conll03_file(
+            data_dir, split, delimiter=delimiter, is_bio=is_bio
+        )
+        print(f"0-th sentence length: {len(self.examples[0].words)}")
         print(self.examples[0].words[:10])
         print(self.examples[0].labels[:10])
         # exit(0)
@@ -1734,7 +1734,6 @@ class TokenClassificationDataModule(pl.LightningDataModule):
         self.num_samples = hparams.num_samples
 
         self.vocab_path = hparams.vocab_path
-        self.step_count = 0
 
         self.delimiter = hparams.delimiter
         self.is_bio = hparams.is_bio
@@ -1800,7 +1799,7 @@ class TokenClassificationDataModule(pl.LightningDataModule):
         self.show_data_summary()
 
     def build_alphabet(self, examples: List[InputExample]):
-        print('Building alphabet vocabulary...')
+        print("Building alphabet vocabulary...")
         time_start = time.time()
         for ex in examples:
             for word in ex.words:
@@ -1819,7 +1818,7 @@ class TokenClassificationDataModule(pl.LightningDataModule):
             #     self.feature_alphabets[idx].add(feat_idx)
         time_finish = time.time()
         timecost = time_finish - time_start
-        print(f'End: {timecost / 60.} min.')
+        print(f"End: {timecost / 60.} min.")
 
     def show_data_summary(self):
 
@@ -2041,6 +2040,8 @@ class TokenClassificationModule(pl.LightningModule):
 
         self.nbest = hparams.nbest
 
+        # self.step_count = 0
+
         # self.number_normalized = number_normalized  # need to recover in decoding
         # self.max_sent_length = hparams.max_sent_length  # necessary in decoding
 
@@ -2130,7 +2131,6 @@ class TokenClassificationModule(pl.LightningModule):
                 )
                 not_match += 1
 
-        
         pretrained_size = len(embedd_dict)
         print(
             "Embedding:\n     pretrain word:%s, prefect match:%s, case_match:%s, oov:%s, oov%%:%s"
@@ -2700,15 +2700,16 @@ if __name__ == "__main__":
         best_model = TokenClassificationModule.load_from_checkpoint(
             checkpoint_callback.best_model_path
         )
-        best_model.model.save_step = best_model.step_count
-        save_path = best_model.output_dir.joinpath(
-            f"best_model.{best_model.step_count}.pt"
-        )
+        save_path = best_model.output_dir.joinpath(f"best_model.pt")
         # best_model.model.save_pretrained(save_path)
         torch.save(best_model.model.state_dict(), save_path)
 
     elif args.do_predict:
-
+        if args.model_path.endswith(".ckpt"):
+            model = TokenClassificationModule.load_from_checkpoint(args.model_path)
+            new_model_path = Path(args.model_path).parent / "prediction_model.pt"
+            save_path = model.output_dir.joinpath(new_model_path)
+            args.model_path = str(new_model_path)
         datadir = Path(args.data_dir)
         if datadir.exists():
             texts = []
@@ -2716,7 +2717,7 @@ if __name__ == "__main__":
                 with open(txt_path) as fp:
                     text = fp.read()
                     texts.append(text)
-            print(f'Start Prediction...')
+            print(f"Start Prediction...")
             time_start = time.time()
             dl = dm.get_prediction_dataloader(texts)
             # TODO: check dataloader properly works here (num_workers)
@@ -2728,7 +2729,7 @@ if __name__ == "__main__":
             decode_results = [l for d in prediction_batch for l in d["prediction"]]
             time_finish = time.time()
             timecost = time_finish - time_start
-            print(f'End: {timecost / 60.} min.')            
+            print(f"End: {timecost / 60.} min.")
             # TODO: do alignment with original tokens
             outpath = Path(args.output_dir) / "result.txt"
             print(content_list[0])
