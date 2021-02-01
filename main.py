@@ -1260,7 +1260,6 @@ class _Alphabet:
         return new_word
 
 
-
 class Alphabet:
     def __init__(self, name, label=False, keep_growing=False):
         self.name = name
@@ -1312,7 +1311,9 @@ class Alphabet:
         try:
             return self.instances[index - 1]
         except IndexError:
-            print('WARNING:Alphabet get_instance ,unknown instance, return the first label.')
+            print(
+                "WARNING:Alphabet get_instance ,unknown instance, return the first label."
+            )
             return self.instances[0]
 
     def size(self):
@@ -1327,7 +1328,7 @@ class Alphabet:
     def enumerate_items(self, start=1):
         if start < 1 or start >= self.size():
             raise IndexError("Enumerate is allowed between [1 : size of the alphabet)")
-        return zip(range(start, len(self.instances) + 1), self.instances[start - 1:])
+        return zip(range(start, len(self.instances) + 1), self.instances[start - 1 :])
 
     def close(self):
         self.keep_growing = False
@@ -1948,31 +1949,37 @@ class TokenClassificationDataModule(pl.LightningDataModule):
         )
 
     def train_dataloader(self):
-        if self.do_train:
-            return self.create_dataloader(
-                self.train_dataset,
-                self.train_batch_size,
-                self.num_workers,
-                shuffle=True,
-            )
-        else:
-            return None
+        if not self.do_train:
+            self.train_examples = ExamplesBuilder(
+                self.data_dir, Split.train, self.delimiter, self.is_bio
+            ).examples
+            self.train_dataset = self.create_dataset(self.train_examples)
+        return self.create_dataloader(
+            self.train_dataset,
+            self.train_batch_size,
+            self.num_workers,
+            shuffle=True,
+        )
 
     def val_dataloader(self):
-        if self.do_train:
-            return self.create_dataloader(
-                self.val_dataset, self.eval_batch_size, self.num_workers, shuffle=False
-            )
-        else:
-            return None
+        if not self.do_train:
+            self.val_examples = ExamplesBuilder(
+                self.data_dir, Split.dev, self.delimiter, self.is_bio
+            ).examples
+            self.val_dataset = self.create_dataset(self.val_examples)
+        return self.create_dataloader(
+            self.val_dataset, self.eval_batch_size, self.num_workers, shuffle=False
+        )
 
     def test_dataloader(self):
-        if self.do_train:
-            return self.create_dataloader(
-                self.test_dataset, self.eval_batch_size, self.num_workers, shuffle=False
-            )
-        else:
-            return None
+        if not self.do_train:
+            self.test_examples = ExamplesBuilder(
+                self.data_dir, Split.test, self.delimiter, self.is_bio
+            ).examples
+            self.test_dataset = self.create_dataset(self.test_examples)
+        return self.create_dataloader(
+            self.test_dataset, self.eval_batch_size, self.num_workers, shuffle=False
+        )
 
     def get_prediction_dataloader(self, texts: ListStr):
         self.examples = self.tokenizer.make_dummy_examples(texts)
@@ -2782,21 +2789,25 @@ if __name__ == "__main__":
             model = TokenClassificationModule(args)
         datadir = Path(args.data_dir)
         if datadir.exists():
-            texts = []
-            for txt_path in datadir.glob("*.txt"):
-                with open(txt_path) as fp:
-                    text = fp.read()
-                    texts.append(text)
+            if (datadir / "test.txt").exists():
+                dl = dm.test_dataloader()
+            else:
+                texts = []
+                for txt_path in datadir.glob("*.txt"):
+                    with open(txt_path) as fp:
+                        text = fp.read()
+                        texts.append(text)
+                dl = dm.get_prediction_dataloader(texts)
+
             print(f"Start Prediction...")
             time_start = time.time()
-            dl = dm.get_prediction_dataloader(texts)
-            # TODO: check dataloader properly works here (num_workers)
+
             prediction_batch = [
                 model.predict_step(batch, i) for i, batch in enumerate(dl)
             ]
-
             content_list = [w for d in prediction_batch for w in d["input"]]
             decode_results = [l for d in prediction_batch for l in d["prediction"]]
+
             time_finish = time.time()
             timecost = time_finish - time_start
             print(f"End: {timecost / 60.} min.")
