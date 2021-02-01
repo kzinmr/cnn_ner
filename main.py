@@ -2778,7 +2778,7 @@ if __name__ == "__main__":
         )
         save_path = Path(checkpoint_callback.best_model_path).parent / f"best_model.pt"
         torch.save(best_model.model.state_dict(), save_path)
-
+        trainer.test(ckpt_path=checkpoint_callback.best_model_path)
     elif args.do_predict:
         if args.model_path.endswith(".ckpt"):
             model = TokenClassificationModule.load_from_checkpoint(args.model_path)
