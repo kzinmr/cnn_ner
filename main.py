@@ -2699,16 +2699,15 @@ if __name__ == "__main__":
         best_model = TokenClassificationModule.load_from_checkpoint(
             checkpoint_callback.best_model_path
         )
-        save_path = best_model.output_dir.joinpath(f"best_model.pt")
-        # best_model.model.save_pretrained(save_path)
+        save_path = Path(checkpoint_callback.best_model_path).parent / f"best_model.pt"
         torch.save(best_model.model.state_dict(), save_path)
 
     elif args.do_predict:
         if args.model_path.endswith(".ckpt"):
             model = TokenClassificationModule.load_from_checkpoint(args.model_path)
-            new_model_path = Path(args.model_path).parent / "prediction_model.pt"
-            save_path = model.output_dir.joinpath(new_model_path)
-            args.model_path = str(new_model_path)
+            save_path = Path(args.model_path).parent / "prediction_model.pt"
+            torch.save(model.model.state_dict(), save_path)
+            args.model_path = str(save_path)
         else:
             model = TokenClassificationModule(args)
         datadir = Path(args.data_dir)
