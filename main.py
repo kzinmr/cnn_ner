@@ -31,6 +31,8 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
+CHAR_PADDING_ID = 0
+
 ListStr = List[str]
 ListListStr = List[ListStr]
 ListInt = List[int]
@@ -690,12 +692,12 @@ class WordRep(nn.Module):
             self.word_embedding.weight.data.copy_(
                 torch.from_numpy(pretrain_word_embedding)
             )
-        else:
-            self.word_embedding.weight.copy_(
-                torch.from_numpy(
-                    self.random_embedding(word_alphabet_size, self.embedding_dim)
-                )
-            )
+        # else:
+        #     self.word_embedding.weight.copy_(
+        #         torch.from_numpy(
+        #             self.random_embedding(word_alphabet_size, self.embedding_dim)
+        #         )
+        #     )
 
         self.feature_num = feature_num
         self.feature_embeddings = nn.ModuleList()
@@ -1153,7 +1155,7 @@ class TokenClassificationModel(nn.Module):
         return scores, tag_seq
 
 
-class Alphabet:
+class _Alphabet:
     def __init__(self, name, keep_growing=False):
         self.name = name
         self.UNKNOWN = "</unk>"
@@ -1193,7 +1195,7 @@ class Alphabet:
 
     def get_instance(self, index):
         try:
-            return self.instances[index]
+            return self.instances[index - 1]
         except IndexError:
             print(
                 "WARNING:Alphabet get_instance ,unknown instance, return the first label."
@@ -1258,33 +1260,44 @@ class Alphabet:
         return new_word
 
 
-class _Alphabet:
-    def __init__(self, name, label=False, keep_growing=True):
+
+class Alphabet:
+    def __init__(self, name, label=False, keep_growing=False):
         self.name = name
         self.UNKNOWN = "</unk>"
         self.label = label
+        if name == "label":
+            self.label = True
         self.instance2index = {}
         self.instances = []
         self.keep_growing = keep_growing
 
         # Index 0 is occupied by default, all else following.
-        self.default_index = 0
-        self.next_index = 1
+        self._default_index = 0
+        self._next_index = 1  # self.instance2index starts from 1
         if not self.label:
             self.add(self.UNKNOWN)
+
+    def clear(self):
+        self.instance2index = {}
+        self.instances = []
+
+        # Index 0 is occupied by default, all else following.
+        self._default_index = 0
+        self._next_index = 1
 
     def add(self, instance):
         if instance not in self.instance2index:
             self.instances.append(instance)
-            self.instance2index[instance] = self.next_index
-            self.next_index += 1
+            self.instance2index[instance] = self._next_index
+            self._next_index += 1
 
     def get_index(self, instance):
-        try:
+        if instance in self.instance2index:
             return self.instance2index[instance]
-        except KeyError:
+        else:
             if self.keep_growing:
-                index = self.next_index
+                index = self._next_index
                 self.add(instance)
                 return index
             else:
@@ -1299,16 +1312,73 @@ class _Alphabet:
         try:
             return self.instances[index - 1]
         except IndexError:
-            print(
-                "WARNING:Alphabet get_instance ,unknown instance, return the first label."
-            )
+            print('WARNING:Alphabet get_instance ,unknown instance, return the first label.')
             return self.instances[0]
 
     def size(self):
-        # if self.label:
-        #     return len(self.instances)
-        # else:
-        return len(self.instances) + 1
+        if self.label:
+            return len(self.instances)
+        else:
+            return len(self.instances) + 1
+
+    def items(self):
+        return self.instance2index.items()
+
+    def enumerate_items(self, start=1):
+        if start < 1 or start >= self.size():
+            raise IndexError("Enumerate is allowed between [1 : size of the alphabet)")
+        return zip(range(start, len(self.instances) + 1), self.instances[start - 1:])
+
+    def close(self):
+        self.keep_growing = False
+
+    def open(self):
+        self.keep_growing = True
+
+    def get_content(self):
+        return {"instance2index": self.instance2index, "instances": self.instances}
+
+    def from_json(self, data):
+        self.instances = data["instances"]
+        self.instance2index = data["instance2index"]
+
+    def save(self, output_directory, name=None):
+        """
+        Save both alhpabet records to the given directory.
+        :param output_directory: Directory to save model and weights.
+        :param name: The alphabet saving name, optional.
+        :return:
+        """
+        saving_name = name if name else self.name
+        try:
+            json.dump(
+                self.get_content(),
+                open(os.path.join(output_directory, saving_name + ".json"), "w"),
+            )
+        except Exception as e:
+            print("Exception: Alphabet is not saved: " % repr(e))
+
+    def load(self, input_directory, name=None):
+        """
+        Load model architecture and weights from the give directory. This allow we use old models even the structure
+        changes.
+        :param input_directory: Directory to save model and weights
+        :return:
+        """
+        loading_name = name if name else self.name
+        self.from_json(
+            json.load(open(os.path.join(input_directory, loading_name + ".json")))
+        )
+
+    @staticmethod
+    def normalize_word(word):
+        new_word = ""
+        for char in word:
+            if char.isdigit():
+                new_word += "0"
+            else:
+                new_word += char
+        return new_word
 
 
 class ExamplesBuilder:
@@ -1664,7 +1734,7 @@ class TokenClassificationBatch:
         ### deal with char
         # pad_chars (batch_size, max_seq_len)
         pad_chars = [
-            chars[idx] + [[0]] * (max_seq_len - len(chars[idx]))
+            chars[idx] + [[CHAR_PADDING_ID]] * (max_seq_len - len(chars[idx]))
             for idx in range(len(chars))
         ]
         length_list = [list(map(len, pad_char)) for pad_char in pad_chars]
