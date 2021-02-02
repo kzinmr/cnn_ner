@@ -4,8 +4,9 @@ python3 main.py \
 --eval_batch_size=64 \
 --num_workers=6 \
 --pretrain_embed_path="/app/workspace/models/word2vec.txt" \
---learning_rate=0.1 \
+--learning_rate=0.015 \
 --anneal_factor=0.5 \
+--monitor="loss" \
 --max_epochs=100 \
 --output_dir="/app/workspace/output/" \
 --config_path="/app/workspace/models/train.config" \

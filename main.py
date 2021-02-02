@@ -910,14 +910,14 @@ class WordSequence(nn.Module):
                 self.pointwise_cnn_list = nn.ModuleList()
                 self.cnn_drop_list = nn.ModuleList()
                 self.cnn_batchnorm_list = nn.ModuleList()
-                # pad_size = int((self.cnn_kernel - 1) / 2)
+                pad_size = int((self.cnn_kernel - 1) / 2)
                 for idx in range(self.cnn_layer):
                     self.depthwise_cnn_list.append(
                         nn.Conv1d(
                             self.hidden_dim,
                             self.hidden_dim,
                             kernel_size=self.cnn_kernel,
-                            padding=1,
+                            padding=pad_size,
                             groups=self.hidden_dim,
                         )  # depthwise
                     )
@@ -2385,24 +2385,27 @@ class TokenClassificationModule(pl.LightningModule):
     def validation_step(
         self, val_batch: TokenClassificationBatch, batch_idx
     ) -> Dict[str, torch.Tensor]:
-        words, pred_label, gold_label = self.predict(val_batch)
-
-        # return {"val_step_loss": loss}
-        return {
-            "target": gold_label,
-            "prediction": pred_label,
-        }
+        if self.monitor == 'loss':
+            loss = self.calculate_loss(val_batch)
+            return {"val_step_loss": loss}
+        else:
+            words, pred_label, gold_label = self.predict(val_batch)
+            return {
+                "target": gold_label,
+                "prediction": pred_label,
+            }
 
     def validation_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
-        # avg_loss = torch.stack([x["val_step_loss"] for x in outputs]).mean()
-        # self.log("val_loss", avg_loss, sync_dist=True)
-        accuracy, precision, recall, f1, support = self.eval_f1(outputs)
-
-        self.log("val_accuracy", accuracy)
-        self.log("val_precision", precision)
-        self.log("val_recall", recall)
-        self.log("val_f1", f1)
-        self.log("val_support", support)
+        if self.monitor == 'loss':
+            avg_loss = torch.stack([x["val_step_loss"] for x in outputs]).mean()
+            self.log("val_loss", avg_loss, sync_dist=True)
+        else:
+            accuracy, precision, recall, f1, support = self.eval_f1(outputs)
+            self.log("val_accuracy", accuracy)
+            self.log("val_precision", precision)
+            self.log("val_recall", recall)
+            self.log("val_f1", f1)
+            self.log("val_support", support)
 
     def test_step(
         self, test_batch: TokenClassificationBatch, batch_idx
@@ -2470,13 +2473,13 @@ class TokenClassificationModule(pl.LightningModule):
             "optimizer": self.optimizer,
             "lr_scheduler": ReduceLROnPlateau(
                 self.optimizer,
-                mode="max",  # "min",
+                mode="min" if self.monitor == 'loss' else "max",
                 factor=self.hparams.anneal_factor,
                 patience=self.hparams.patience,
                 min_lr=1e-5,
                 verbose=True,
             ),
-            "monitor": "val_f1",  # "val_loss",
+            "monitor": "val_loss" if self.monitor == 'loss' else "val_f1",
         }
 
     @staticmethod
@@ -2547,6 +2550,12 @@ class TokenClassificationModule(pl.LightningModule):
             type=int,
             help="dimension of character hidden state.",
         )
+        parser.add_argument(
+            "--monitor",
+            default="loss",
+            type=str,
+            help="what metrics to monitor(loss/f1)",
+        )
         parser.add_argument("--use_crf", action="store_true")
         parser.add_argument("--use_char", action="store_true")
         parser.add_argument("--use_idcnn", action="store_true")
@@ -2604,7 +2613,7 @@ def main_as_plmodule():
             filename="checkpoint-{epoch}-{val_f1:.2f}",
             save_top_k=10,
             verbose=True,
-            monitor="val_f1",  # "val_loss",
+            monitor="val_loss" if argparse_args.monitor == 'loss' else "val_f1",
             mode="max",  # "min",
         )
         lr_logger = LearningRateMonitor(logging_interval="step")
