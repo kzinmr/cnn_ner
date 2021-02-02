@@ -36,10 +36,7 @@ RUN pip3 install -U pip
 COPY ./requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY *.py /app/
-COPY *.sh /app/
-
-RUN mkdir -p /app/workspace/data
-RUN mkdir -p /app/workspace/models
+COPY main.py /app/
+COPY run.sh /app/
 
 CMD ["bash", "/app/run.sh"]
