@@ -967,8 +967,12 @@ class WordSequence(nn.Module):
                                 idx
                             ][i].cuda()
                     elif self.use_sepcnn:
-                        self.depthwise_cnn_list[idx] = self.depthwise_cnn_list[idx].cuda()
-                        self.pointwise_cnn_list[idx] = self.pointwise_cnn_list[idx].cuda()
+                        self.depthwise_cnn_list[idx] = self.depthwise_cnn_list[
+                            idx
+                        ].cuda()
+                        self.pointwise_cnn_list[idx] = self.pointwise_cnn_list[
+                            idx
+                        ].cuda()
                     else:
                         self.cnn_list[idx] = self.cnn_list[idx].cuda()
                     self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
@@ -1021,7 +1025,11 @@ class WordSequence(nn.Module):
                         cnn_feature = self.dcnn_drop_list[idx][i](cnn_feature)
                         cnn_feature = self.dcnn_batchnorm_list[idx][i](cnn_feature)
                 elif self.use_sepcnn:
-                    cnn_feature = F.relu(self.pointwise_cnn_list[idx](self.depthwise_cnn_list[idx](cnn_feature)))
+                    cnn_feature = F.relu(
+                        self.pointwise_cnn_list[idx](
+                            self.depthwise_cnn_list[idx](cnn_feature)
+                        )
+                    )
                 else:
                     cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
 
@@ -2385,7 +2393,7 @@ class TokenClassificationModule(pl.LightningModule):
     def validation_step(
         self, val_batch: TokenClassificationBatch, batch_idx
     ) -> Dict[str, torch.Tensor]:
-        if self.monitor == 'loss':
+        if self.hparams.monitor == "loss":
             loss = self.calculate_loss(val_batch)
             return {"val_step_loss": loss}
         else:
@@ -2396,7 +2404,7 @@ class TokenClassificationModule(pl.LightningModule):
             }
 
     def validation_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
-        if self.monitor == 'loss':
+        if self.hparams.monitor == "loss":
             avg_loss = torch.stack([x["val_step_loss"] for x in outputs]).mean()
             self.log("val_loss", avg_loss, sync_dist=True)
         else:
@@ -2473,13 +2481,13 @@ class TokenClassificationModule(pl.LightningModule):
             "optimizer": self.optimizer,
             "lr_scheduler": ReduceLROnPlateau(
                 self.optimizer,
-                mode="min" if self.monitor == 'loss' else "max",
+                mode="min" if self.hparams.monitor == "loss" else "max",
                 factor=self.hparams.anneal_factor,
                 patience=self.hparams.patience,
                 min_lr=1e-5,
                 verbose=True,
             ),
-            "monitor": "val_loss" if self.monitor == 'loss' else "val_f1",
+            "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
         }
 
     @staticmethod
@@ -2613,7 +2621,7 @@ def main_as_plmodule():
             filename="checkpoint-{epoch}-{val_f1:.2f}",
             save_top_k=10,
             verbose=True,
-            monitor="val_loss" if argparse_args.monitor == 'loss' else "val_f1",
+            monitor="val_loss" if argparse_args.monitor == "loss" else "val_f1",
             mode="max",  # "min",
         )
         lr_logger = LearningRateMonitor(logging_interval="step")
