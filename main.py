@@ -5,6 +5,7 @@ import argparse
 import json
 import multiprocessing
 import os
+import pickle
 import sys
 import time
 from dataclasses import dataclass
@@ -807,6 +808,7 @@ class WordSequence(nn.Module):
         word_dropout: float = 0.05,
         use_char: bool = True,
         use_idcnn: bool = False,
+        use_sepcnn: bool = False,
         use_bilstm: bool = False,
         pretrain_word_embedding: Optional[np.array] = None,
         gpu: bool = False,
@@ -872,6 +874,7 @@ class WordSequence(nn.Module):
             self.cnn_layer = cnn_layer
             print("CNN layer: ", self.cnn_layer)
             self.use_idcnn = use_idcnn
+            self.use_sepcnn = use_sepcnn
             self.cnn_kernel = cnn_kernel
             if self.use_idcnn:
                 self.cnn_list = nn.ModuleList()
@@ -902,7 +905,30 @@ class WordSequence(nn.Module):
                     self.cnn_list.append(dcnn)
                     self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                     self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
-
+            elif self.use_sepcnn:
+                self.cnn_list = nn.ModuleList()
+                self.cnn_drop_list = nn.ModuleList()
+                self.cnn_batchnorm_list = nn.ModuleList()
+                # pad_size = int((self.cnn_kernel - 1) / 2)
+                for idx in range(self.cnn_layer):
+                    self.cnn_list.append(
+                        nn.Conv1d(
+                            self.hidden_dim,
+                            self.hidden_dim,
+                            kernel_size=self.cnn_kernel,
+                            padding=1,
+                            groups=self.hidden_dim,
+                        )  # depthwise
+                    )
+                    self.cnn_list.append(
+                        nn.Conv1d(
+                            self.hidden_dim,
+                            self.hidden_dim,
+                            kernel_size=1,
+                        )  # pointwise
+                    )
+                    self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
+                    self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
             else:
                 # Sequentialでやるとloss発散
                 self.cnn_list = nn.ModuleList()
@@ -968,7 +994,7 @@ class WordSequence(nn.Module):
             Variable(batch_size, sent_len, hidden_dim)
         """
 
-        word_represent = self.wordrep(
+        word_represent = self.wordrep.forward(
             word_inputs,
             feature_inputs,
             word_seq_lengths,
@@ -1030,6 +1056,7 @@ class TokenClassificationModel(nn.Module):
         word_dropout: float = 0.05,
         use_char: bool = True,
         use_idcnn: bool = False,
+        use_sepcnn: bool = False,
         use_bilstm: bool = False,
         use_crf: bool = True,
         average_batch: bool = False,
@@ -1055,6 +1082,7 @@ class TokenClassificationModel(nn.Module):
             word_dropout,
             use_char,
             use_idcnn,
+            use_sepcnn,
             use_bilstm,
             pretrain_word_embedding,
             gpu,
@@ -1075,7 +1103,7 @@ class TokenClassificationModel(nn.Module):
         batch_label,
         mask,
     ):
-        outs = self.word_hidden(
+        outs = self.word_hidden.forward(
             word_inputs,
             feature_inputs,
             word_seq_lengths,
@@ -1106,7 +1134,7 @@ class TokenClassificationModel(nn.Module):
         char_seq_recover,
         mask,
     ):
-        outs = self.word_hidden(
+        outs = self.word_hidden.forward(
             word_inputs,
             feature_inputs,
             word_seq_lengths,
@@ -1140,7 +1168,7 @@ class TokenClassificationModel(nn.Module):
         if not self.use_crf:
             print("Nbest output is currently supported only for CRF! Exit...")
             exit(0)
-        outs = self.word_hidden(
+        outs = self.word_hidden.forward(
             word_inputs,
             feature_inputs,
             word_seq_lengths,
@@ -1158,6 +1186,7 @@ class Alphabet:
     def __init__(self, name, label=False, keep_growing=False):
         self.name = name
         self.UNKNOWN = "</unk>"
+        self.PAD = "</pad>"
         self.label = label
         if name == "label":
             self.label = True
@@ -1196,12 +1225,13 @@ class Alphabet:
             else:
                 return self.instance2index[self.UNKNOWN]
 
-    def get_instance(self, index):
+    def get_instance(self, index: int) -> str:
         if index == 0:
             if self.label:
                 return self.instances[0]
             # First index is occupied by the wildcard element.
-            return None
+            else:
+                return self.PAD  # originally None
         if index - 1 < len(self.instances):
             return self.instances[index - 1]
         else:
@@ -1635,7 +1665,7 @@ class TokenClassificationBatch:
             for idx in range(len(chars))
         ]
         length_list = [list(map(len, pad_char)) for pad_char in pad_chars]
-        max_word_len = max(map(max, length_list))
+        max_word_len = max([max(ints) for ints in length_list])
         char_seq_tensor = torch.zeros(
             (batch_size, max_seq_len, max_word_len),  # requires_grad=if_train
         ).long()
@@ -1691,9 +1721,7 @@ class TokenClassificationDataModule(pl.LightningDataModule):
         self.data_dir = hparams.data_dir
         if not os.path.exists(self.data_dir):
             os.mkdir(self.data_dir)
-        self.output_dir = hparams.output_dir
-        if not os.path.exists(self.output_dir):
-            os.mkdir(self.output_dir)
+
         self.train_batch_size = hparams.train_batch_size
         self.eval_batch_size = hparams.eval_batch_size
         self.num_workers = hparams.num_workers
@@ -1740,15 +1768,22 @@ class TokenClassificationDataModule(pl.LightningDataModule):
             self.test_dataset = self.create_dataset(self.test_examples)
 
         else:
-            word_alphabet = Alphabet("word")
-            word_alphabet.load(self.vocab_path)
-            char_alphabet = Alphabet("character")
-            char_alphabet.load(self.vocab_path)
-            label_alphabet = Alphabet("label")
-            label_alphabet.load(self.vocab_path)
-            self.word_alphabet = word_alphabet
-            self.char_alphabet = char_alphabet
-            self.label_alphabet = label_alphabet
+            if self.vocab_path.endswith(".pkl"):
+                with open(self.vocab_path, "rb") as fp:
+                    model_dict = pickle.load(fp)
+                    self.word_alphabet = model_dict["word_alphabet"]
+                    self.char_alphabet = model_dict["char_alphabet"]
+                    self.label_alphabet = model_dict["label_alphabet"]
+            else:
+                word_alphabet = Alphabet("word")
+                word_alphabet.load(self.vocab_path)
+                char_alphabet = Alphabet("character")
+                char_alphabet.load(self.vocab_path)
+                label_alphabet = Alphabet("label")
+                label_alphabet.load(self.vocab_path)
+                self.word_alphabet = word_alphabet
+                self.char_alphabet = char_alphabet
+                self.label_alphabet = label_alphabet
 
             self.tokenizer = Tokenizer()
             # constructed on demand
@@ -1954,41 +1989,52 @@ class TokenClassificationModule(pl.LightningModule):
         # Enable to access arguments via self.hparams
         self.save_hyperparameters(hparams)
 
-        # NOTE: Fit and save vocab first in DataModule.
-        self.vocab_path = hparams.vocab_path
-        word_alphabet = Alphabet("word")
-        word_alphabet.load(self.vocab_path)
-        char_alphabet = Alphabet("character")
-        char_alphabet.load(self.vocab_path)
-        label_alphabet = Alphabet("label")
-        label_alphabet.load(self.vocab_path)
-        self.word_alphabet = word_alphabet
-        self.char_alphabet = char_alphabet
-        self.label_alphabet = label_alphabet
-
-        self.config_path = hparams.config_path
-        self.gpu = hparams.gpu
-
         if hparams.do_train:
-            params = self._load_params(self.config_path)
-            print(f"Loaded params from {self.config_path}: {params}")
-            self.word_emb_dim = params["word_emb_dim"]
-            pretrain_word_embedding = self.build_pretrain_embedding(
-                hparams.pretrain_embed_path
+            self.gpu = hparams.gpu
+            # NOTE: Fit and save vocab first in DataModule.
+            self.model = self._load_model(
+                hparams.vocab_path,
+                hparams.config_path,
+                pretrain_embed_path=hparams.pretrain_embed_path,
             )
-            params["pretrain_word_embedding"] = pretrain_word_embedding
-            self.model = TokenClassificationModel(**params)
-            self.save_step = 0
-
         elif hparams.do_predict:
-            self.model_path = hparams.model_path
             # if self.gpu:
-            #     loaded_state = torch.load(self.model_path)
+            #     loaded_state = torch.load(hparams.model_path)
             # else:
             self.gpu = False
-            loaded_state = torch.load(self.model_path, map_location=torch.device("cpu"))
-            params = self._load_params(self.config_path)
-            print(f"Loaded params from {self.config_path}: {params}")
+            if hparams.model_path.endswith(".pkl"):
+                # model と Alphabet(vocab) をまとめてロード
+                self.model = self._load_pickle(hparams.model_path)
+            else:
+                # NOTE: Fit and save vocab first in DataModule.
+                self.model = self._load_model(
+                    hparams.vocab_path,
+                    hparams.config_path,
+                    model_path=hparams.model_path,
+                )
+            self.model.eval()  # plでは不要かも
+
+        self.model_path: str = hparams.model_path
+        self.nbest = hparams.nbest  # TODO: to be implemented
+        # self.show_model_summary()
+
+    def _load_model(
+        self,
+        vocab_path: str,
+        config_path: str,
+        model_path: Optional[str] = None,
+        pretrain_embed_path: Optional[str] = None,
+    ) -> TokenClassificationModel:
+        self._load_vocab(vocab_path)
+        params = self._load_params(config_path)
+        if pretrain_embed_path is not None:
+            params["pretrain_word_embedding"] = self._build_pretrain_embedding(
+                pretrain_embed_path, params["word_emb_dim"]
+            )
+        print(f"Loaded params from {config_path}: {params}")
+        model = TokenClassificationModel(**params)
+        if model_path is not None:
+            loaded_state = torch.load(model_path, map_location=torch.device("cpu"))
             assert (
                 loaded_state["word_hidden.wordrep.word_embedding.weight"].shape[0]
                 == params["word_alphabet_size"]
@@ -2003,21 +2049,41 @@ class TokenClassificationModule(pl.LightningModule):
                 loaded_state["word_hidden.hidden2tag.weight"].shape[0]
                 == params["label_alphabet_size"] + 2
             )
-
-            model = TokenClassificationModel(**params)
             model.load_state_dict(loaded_state)
-            self.model = model
+        return model
 
-            self.model.eval()
+    def save_pickle(self, save_path: Optional[Union[str, Path]] = None):
+        # paramsに込めるAlphabet(vocab)データもまとめて保存
+        if save_path is None:
+            save_path = self.model_path + ".pkl"
 
-        self.nbest = hparams.nbest
+        with open(save_path, "wb") as fp:
+            model_dict = {
+                "model": self.model,
+                "word_alphabet": self.word_alphabet,
+                "char_alphabet": self.char_alphabet,
+                "label_alphabet": self.label_alphabet,
+            }
+            pickle.dump(model_dict, fp)
 
-        # self.step_count = 0
+    def _load_pickle(self, model_path: str):
+        with open(model_path, "rb") as fp:
+            model_module = pickle.load(fp)
+            self.model = model_module["model"]
+            self.word_alphabet = model_module["word_alphabet"]
+            self.char_alphabet = model_module["char_alphabet"]
+            self.label_alphabet = model_module["label_alphabet"]
 
-        # self.number_normalized = number_normalized  # need to recover in decoding
-        # self.max_sent_length = hparams.max_sent_length  # necessary in decoding
-
-        # self.show_data_summary()
+    def _load_vocab(self, vocab_path: str):
+        word_alphabet = Alphabet("word")
+        word_alphabet.load(vocab_path)
+        char_alphabet = Alphabet("character")
+        char_alphabet.load(vocab_path)
+        label_alphabet = Alphabet("label")
+        label_alphabet.load(vocab_path)
+        self.word_alphabet = word_alphabet
+        self.char_alphabet = char_alphabet
+        self.label_alphabet = label_alphabet
 
     def _load_params(self, config: str) -> dict:
         params = dict(
@@ -2035,6 +2101,7 @@ class TokenClassificationModule(pl.LightningModule):
             word_dropout=0.05,
             use_char=True,
             use_idcnn=False,
+            use_sepcnn=False,
             use_bilstm=False,
             use_crf=True,
             gpu=False,
@@ -2059,8 +2126,9 @@ class TokenClassificationModule(pl.LightningModule):
 
         return params
 
-    def build_pretrain_embedding(self, embedding_path: str) -> np.array:
-        embedd_dim = self.word_emb_dim
+    def _build_pretrain_embedding(
+        self, embedding_path: str, embedd_dim: int
+    ) -> np.array:
         embedd_dict = dict()
         if os.path.exists(embedding_path):
             # line := 'token dim1 dim2 ..\n'
@@ -2077,15 +2145,13 @@ class TokenClassificationModule(pl.LightningModule):
                     first_col = tokens[0]
                     embedd_dict[first_col] = embedd
 
-        word_vocab = self.word_alphabet
-        vocab_size = word_vocab.size()
         scale = np.sqrt(3.0 / embedd_dim)
-        pretrain_emb = np.empty([word_vocab.size(), embedd_dim])
+        pretrain_emb = np.empty([self.word_alphabet.size(), embedd_dim])
         perfect_match = 0
         case_match = 0
         not_match = 0
-        for word, index in word_vocab.items():  # includes </unk>
-            if word == word_vocab.UNKNOWN:
+        for word, index in self.word_alphabet.items():  # includes </unk>
+            if word == self.word_alphabet.UNKNOWN:
                 # pretrain_emb[0, :] = np.zeros((1, embedd_dim))
                 pretrain_emb[index, :] = np.random.uniform(
                     -scale, scale, [1, embedd_dim]
@@ -2111,7 +2177,7 @@ class TokenClassificationModule(pl.LightningModule):
                 perfect_match,
                 case_match,
                 not_match,
-                100 * (not_match + 0.0) / vocab_size,
+                100 * (not_match + 0.0) / self.word_alphabet.size(),
             )
         )
         return pretrain_emb
@@ -2407,66 +2473,6 @@ class TokenClassificationModule(pl.LightningModule):
             "monitor": "val_f1",  # "val_loss",
         }
 
-    def write_results(self, content_list, decode_results, pred_scores, decode_path):
-        # if self.nbest > 1:
-        #     self.write_nbest_decoded_results(
-        #         content_list, decode_results, pred_scores, decode_path
-        #     )
-        # else:
-        self.write_decoded_results(content_list, decode_results, decode_path)
-
-    # @staticmethod
-    # def write_nbest_decoded_results(
-    #     content_list, predict_results, pred_scores, decode_path
-    # ):
-    #     """
-    #     content_list[idx] is a list with [word, char, label]
-    #     predict_results : [whole_sent_num, nbest, each_sent_length]
-    #     pred_scores: [whole_sent_num, nbest]
-    #     """
-
-    #     sent_num = len(predict_results)
-
-    #     assert sent_num == len(content_list)
-    #     assert sent_num == len(pred_scores)
-
-    #     with open(decode_path, "w") as fout:
-    #         for idx in range(sent_num):
-    #             sent_length = len(predict_results[idx][0])
-    #             nbest = len(predict_results[idx])
-    #             score_string = "# "
-    #             for idz in range(nbest):
-    #                 score_string += format(pred_scores[idx][idz], ".4f") + " "
-    #             fout.write(score_string.strip() + "\n")
-
-    #             for idy in range(sent_length):
-    #                 label_string = content_list[idx][0][idy] + " "
-    #                 for idz in range(nbest):
-    #                     label_string += predict_results[idx][idz][idy] + " "
-    #                 label_string = label_string.strip() + "\n"
-    #                 fout.write(label_string)
-    #             fout.write("\n")
-
-    @staticmethod
-    def write_decoded_results(
-        content_list: ListListStr,
-        predict_results: ListListStr,
-        decode_path: Union[str, Path],
-    ):
-        """
-        content_list[idx] is a list with [word, char, label]
-        """
-        sent_num = len(predict_results)
-        assert sent_num == len(content_list)
-        with open(decode_path, "w") as fout:
-            for idx in range(sent_num):
-                sent_length = len(predict_results[idx])
-                for idy in range(sent_length):
-                    fout.write(
-                        content_list[idx][idy] + " " + predict_results[idx][idy] + "\n"
-                    )
-                fout.write("\n")
-
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
@@ -2541,45 +2547,16 @@ class TokenClassificationModule(pl.LightningModule):
         return parser
 
 
-def make_trainer(argparse_args: argparse.Namespace):
-    """
-    Prepare pl.Trainer with callbacks and args
-    """
-
-    # early_stopping = EarlyStopping(monitor="val_loss", mode="min", verbose=True)
-
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=argparse_args.output_dir,
-        filename="checkpoint-{epoch}-{val_f1:.2f}",
-        save_top_k=10,
-        verbose=True,
-        monitor="val_f1",  # "val_loss",
-        mode="max"  # "min",
-    )
-    lr_logger = LearningRateMonitor(logging_interval="step")
-
-    trainer = pl.Trainer.from_argparse_args(
-        argparse_args,
-        callbacks=[lr_logger, checkpoint_callback],
-        deterministic=True,
-        accumulate_grad_batches=args.accumulate_grad_batches,
-    )
-    return trainer, checkpoint_callback
-
-
-if __name__ == "__main__":
+def make_common_args():
     parser = argparse.ArgumentParser(description="CharCNN-NER module from NCRF++")
-    parser.add_argument("--model_path", default="model/cnn.0.model", type=str)
-    parser.add_argument("--config_path", default="model/train.config", type=str)
-    parser.add_argument("--vocab_path", default="model/", type=str)
-    parser.add_argument("--nbest", default=1, type=int)
-    parser.add_argument("--batch-size", default=32, type=int)
-    parser.add_argument("--max-sent-length", default=250, type=int)
+    parser.add_argument("--model_path", type=str)  #  default="model/cnn.0.model",
+    parser.add_argument("--config_path", type=str)  #  default="model/train.config",
+    parser.add_argument("--vocab_path", type=str)  # , default="model/"
+    parser.add_argument("--nbest", default=1, type=int, help="to be implemented")
     parser.add_argument("--number-normalized", default=True, type=bool)
-    # parser.add_argument("--decode_dir", default="/app/workspace/models", type=str)
     parser.add_argument(
         "--output_dir",
-        default="/app/workspace/models",
+        # default="/app/workspace/models",
         type=str,
         help="The output directory where the model predictions and checkpoints will be written.",
     )
@@ -2603,7 +2580,38 @@ if __name__ == "__main__":
     parser.add_argument(
         "--download", action="store_true", help="Whether to download dataset."
     )
+    return parser
 
+
+def main_as_plmodule():
+    """PyTorch-Lightning Moduleとして訓練・予測を行う"""
+
+    def make_trainer(argparse_args: argparse.Namespace):
+        """
+        Prepare pl.Trainer with callbacks and args
+        """
+
+        # early_stopping = EarlyStopping(monitor="val_loss", mode="min", verbose=True)
+
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=argparse_args.output_dir,
+            filename="checkpoint-{epoch}-{val_f1:.2f}",
+            save_top_k=10,
+            verbose=True,
+            monitor="val_f1",  # "val_loss",
+            mode="max",  # "min",
+        )
+        lr_logger = LearningRateMonitor(logging_interval="step")
+
+        trainer = pl.Trainer.from_argparse_args(
+            argparse_args,
+            callbacks=[lr_logger, checkpoint_callback],
+            deterministic=True,
+            accumulate_grad_batches=argparse_args.accumulate_grad_batches,
+        )
+        return trainer, checkpoint_callback
+
+    parser = make_common_args()
     parser = pl.Trainer.add_argparse_args(parent_parser=parser)
     parser = TokenClassificationModule.add_model_specific_args(parent_parser=parser)
     parser = TokenClassificationDataModule.add_model_specific_args(parent_parser=parser)
@@ -2633,23 +2641,31 @@ if __name__ == "__main__":
         model = TokenClassificationModule(args)
         trainer, checkpoint_callback = make_trainer(args)
         trainer.fit(model, dm)
+
+        trainer.test(ckpt_path=checkpoint_callback.best_model_path)
         # save best model
         # logger.info("Best checkpoint path: {}".format(checkpoint_callback.best_model_path))
         # logger.info("Best score(val loss): {}".format(checkpoint_callback.best_model_score))
         best_model = TokenClassificationModule.load_from_checkpoint(
             checkpoint_callback.best_model_path
         )
-        save_path = Path(checkpoint_callback.best_model_path).parent / f"best_model.pt"
+        save_path = Path(checkpoint_callback.best_model_path).parent / "best_model.pt"
         torch.save(best_model.model.state_dict(), save_path)
-        trainer.test(ckpt_path=checkpoint_callback.best_model_path)
+        save_path = Path(checkpoint_callback.best_model_path).parent / "best_model.pkl"
+        best_model.save_pickle(save_path)
     elif args.do_predict:
         if args.model_path.endswith(".ckpt"):
+            ## NOTE: the path structure on training is pickled in .ckpt
+            print(args.model_path)
             model = TokenClassificationModule.load_from_checkpoint(args.model_path)
             save_path = Path(args.model_path).parent / "prediction_model.pt"
             torch.save(model.model.state_dict(), save_path)
             args.model_path = str(save_path)
         else:
             model = TokenClassificationModule(args)
+
+        save_path = Path(args.model_path).parent / "prediction_model.pkl"
+        model.save_pickle(save_path)
         datadir = Path(args.data_dir)
         if datadir.exists():
             if (datadir / "test.txt").exists():
@@ -2700,3 +2716,7 @@ if __name__ == "__main__":
         else:
             print(f"no input file given: {datadir}")
             exit(0)
+
+
+if __name__ == "__main__":
+    main_as_plmodule()
