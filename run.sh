@@ -2,7 +2,7 @@ python3 main.py \
 --data_dir="/app/workspace/data/" \
 --train_batch_size=128 \
 --eval_batch_size=64 \
---num_workers=8 \
+--num_workers=6 \
 --pretrain_embed_path="/app/workspace/models/word2vec.txt" \
 --learning_rate=0.1 \
 --anneal_factor=0.5 \
