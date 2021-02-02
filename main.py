@@ -2620,7 +2620,7 @@ def main_as_plmodule():
 
         checkpoint_callback = ModelCheckpoint(
             dirpath=argparse_args.output_dir,
-            filename="checkpoint-{epoch}-{val_f1:.2f}",
+            filename="checkpoint-{epoch}-{val_loss:.2f}",
             save_top_k=10,
             verbose=True,
             monitor="val_loss" if argparse_args.monitor == "loss" else "val_f1",
