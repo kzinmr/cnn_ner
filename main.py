@@ -919,14 +919,14 @@ class WordSequence(nn.Module):
                             kernel_size=self.cnn_kernel,
                             padding=pad_size,
                             groups=self.hidden_dim,
-                        )  # depthwise
+                        )
                     )
                     self.pointwise_cnn_list.append(
                         nn.Conv1d(
                             self.hidden_dim,
                             self.hidden_dim,
                             kernel_size=1,
-                        )  # pointwise
+                        )
                     )
                     self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                     self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
@@ -1013,7 +1013,7 @@ class WordSequence(nn.Module):
         ## word_embs (batch_size, seq_len, embed_size)
         if self.word_feature_extractor == "CNN":
             word_in = (
-                torch.tanh(self.word2cnn(word_represent)).transpose(2, 1).contiguous()
+                F.relu(self.word2cnn(word_represent)).transpose(2, 1).contiguous()
             )
             # feature_out = self.cnn(word_in).transpose(2,1).contiguous()
 
@@ -2622,7 +2622,7 @@ def main_as_plmodule():
             save_top_k=10,
             verbose=True,
             monitor="val_loss" if argparse_args.monitor == "loss" else "val_f1",
-            mode="max",  # "min",
+            mode="min" if argparse_args.monitor == "loss" else "max",
         )
         lr_logger = LearningRateMonitor(logging_interval="step")
 
