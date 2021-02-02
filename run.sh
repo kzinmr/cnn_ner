@@ -7,7 +7,6 @@ python3 main.py \
 --learning_rate=0.05 \
 --anneal_factor=0.5 \
 --dropout=0.2 \
---word_dropout=0.2 \
 --monitor="loss" \
 --max_epochs=100 \
 --output_dir="/app/workspace/output/" \
