@@ -1013,7 +1013,7 @@ class WordSequence(nn.Module):
         ## word_embs (batch_size, seq_len, embed_size)
         if self.word_feature_extractor == "CNN":
             word_in = (
-                F.relu(self.word2cnn(word_represent)).transpose(2, 1).contiguous()
+                torch.tanh(self.word2cnn(word_represent)).transpose(2, 1).contiguous()
             )
             # feature_out = self.cnn(word_in).transpose(2,1).contiguous()
 
@@ -1027,7 +1027,9 @@ class WordSequence(nn.Module):
                 elif self.use_sepcnn:
                     cnn_feature = F.relu(
                         self.pointwise_cnn_list[idx](
-                            self.depthwise_cnn_list[idx](cnn_feature)
+                            F.relu(
+                                self.depthwise_cnn_list[idx](cnn_feature)
+                            )
                         )
                     )
                 else:
