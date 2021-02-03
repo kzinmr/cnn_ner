@@ -2674,7 +2674,7 @@ class TokenClassificationModule(pl.LightningModule):
             verbose=True,
         )
         scheduler = {
-            "lr_scheduler": lr_scheduler,
+            "scheduler": lr_scheduler,
             "reduce_on_plateau": True,
             "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
         }
