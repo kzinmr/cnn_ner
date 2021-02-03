@@ -953,7 +953,7 @@ class LightConvEncoderLayer(nn.Module):
             encoded output of shape `(batch, src_len, embed_dim)`
         """
         residual = x
-        x = self.maybe_layer_norm(0, x, before=True)
+        # x = self.maybe_layer_norm(0, x, before=True)
         x = self.input_dropout_module(x)
         x = self.linear1(x).transpose(2, 1).contiguous()
         if self.act is not None:
