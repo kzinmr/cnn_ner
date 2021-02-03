@@ -2885,7 +2885,7 @@ def main_as_plmodule():
             trainer.test(
                 model=model,
                 ckpt_path=args.model_path,
-                test_dataloaders=dm.test_dataloader,
+                test_dataloaders=dm.test_dataloader(),
             )
 
             args.model_path = str(save_path)
