@@ -989,10 +989,14 @@ class WordSequence(nn.Module):
                         )
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                         self.depthwise_cnn_norm_list.append(
-                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                            nn.BatchNorm1d(self.hidden_dim)
+                            if self.use_bn
+                            else nn.GroupNorm(1, self.hidden_dim)
                         )
                         self.pointwise_cnn_norm_list.append(
-                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                            nn.BatchNorm1d(self.hidden_dim)
+                            if self.use_bn
+                            else nn.GroupNorm(1, self.hidden_dim)
                         )
                         self.conv2word_list.append(
                             nn.Linear(self.hidden_dim, self.input_size)
@@ -1029,7 +1033,9 @@ class WordSequence(nn.Module):
                         self.cnn_list.append(dcnn)
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                         self.cnn_norm_list.append(
-                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                            nn.BatchNorm1d(self.hidden_dim)
+                            if self.use_bn
+                            else nn.GroupNorm(1, self.hidden_dim)
                         )
                 elif self.use_sepcnn:
                     self.depthwise_cnn_list = nn.ModuleList()
@@ -1057,10 +1063,14 @@ class WordSequence(nn.Module):
                         )
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                         self.depthwise_cnn_norm_list.append(
-                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                            nn.BatchNorm1d(self.hidden_dim)
+                            if self.use_bn
+                            else nn.GroupNorm(1, self.hidden_dim)
                         )
                         self.pointwise_cnn_norm_list.append(
-                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                            nn.BatchNorm1d(self.hidden_dim)
+                            if self.use_bn
+                            else nn.GroupNorm(1, self.hidden_dim)
                         )
                 else:
                     # Sequentialでやるとloss発散
@@ -1079,7 +1089,9 @@ class WordSequence(nn.Module):
                         )
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                         self.cnn_norm_list.append(
-                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                            nn.BatchNorm1d(self.hidden_dim)
+                            if self.use_bn
+                            else nn.GroupNorm(1, self.hidden_dim)
                         )
 
                 self.hidden2tag = nn.Linear(self.hidden_dim, label_alphabet_size)
@@ -1120,9 +1132,7 @@ class WordSequence(nn.Module):
                                     i
                                 ] = self.dcnn_batchnorm_list[idx][i].cuda()
                             self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                            self.cnn_norm_list[idx] = self.cnn_norm_list[
-                                idx
-                            ].cuda()
+                            self.cnn_norm_list[idx] = self.cnn_norm_list[idx].cuda()
                         elif self.use_sepcnn:
                             self.depthwise_cnn_list[idx] = self.depthwise_cnn_list[
                                 idx
@@ -1131,18 +1141,16 @@ class WordSequence(nn.Module):
                                 idx
                             ].cuda()
                             self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                            self.depthwise_cnn_norm_list[idx] = self.depthwise_cnn_norm_list[
+                            self.depthwise_cnn_norm_list[
                                 idx
-                            ].cuda()
-                            self.pointwise_cnn_norm_list[idx] = self.pointwise_cnn_norm_list[
+                            ] = self.depthwise_cnn_norm_list[idx].cuda()
+                            self.pointwise_cnn_norm_list[
                                 idx
-                            ].cuda()
+                            ] = self.pointwise_cnn_norm_list[idx].cuda()
                         else:
                             self.cnn_list[idx] = self.cnn_list[idx].cuda()
                             self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                            self.cnn_norm_list[idx] = self.cnn_norm_list[
-                                idx
-                            ].cuda()
+                            self.cnn_norm_list[idx] = self.cnn_norm_list[idx].cuda()
             else:
                 self.droplstm = self.droplstm.cuda()
                 self.lstm = self.lstm.cuda()
@@ -2873,9 +2881,12 @@ def main_as_plmodule():
             save_path = Path(args.model_path).parent / "prediction_model.pt"
             torch.save(model.model.state_dict(), save_path)
 
-            trainer, checkpoint_callback = make_trainer(args)
-            trainer.model = model
-            trainer.test(ckpt_path=args.model_path)
+            trainer, _ = make_trainer(args)
+            trainer.test(
+                model=model,
+                ckpt_path=args.model_path,
+                test_dataloaders=dm.test_dataloader,
+            )
 
             args.model_path = str(save_path)
         else:
