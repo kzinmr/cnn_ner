@@ -2805,7 +2805,6 @@ def main_as_plmodule():
         """
 
         # early_stopping = EarlyStopping(monitor="val_loss", mode="min", verbose=True)
-
         checkpoint_callback = ModelCheckpoint(
             dirpath=argparse_args.output_dir,
             filename="checkpoint-{epoch}-{val_loss:.2f}",
@@ -2870,6 +2869,9 @@ def main_as_plmodule():
         if args.model_path.endswith(".ckpt"):
             ## NOTE: the path structure on training is pickled in .ckpt
             print(args.model_path)
+            trainer, checkpoint_callback = make_trainer(args)
+            trainer.test(ckpt_path=args.model_path)
+
             model = TokenClassificationModule.load_from_checkpoint(args.model_path)
             save_path = Path(args.model_path).parent / "prediction_model.pt"
             torch.save(model.model.state_dict(), save_path)
