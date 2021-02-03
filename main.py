@@ -1145,7 +1145,7 @@ class WordSequence(nn.Module):
         )
         ## word_embs (batch_size, seq_len, embed_size)
         if self.word_feature_extractor == "CNN":
-            # word_represent = self.word_dropout.forward(word_represent)
+            word_represent = self.word_dropout.forward(word_represent)
             if self.use_sepcnn_rc:
                 # BTC: word_represent
                 cnn_feature = word_represent
