@@ -1103,6 +1103,7 @@ class WordSequence(nn.Module):
             )
             # feature_out = self.cnn(word_in).transpose(2,1).contiguous()
 
+            # BCT: cnn_feature
             cnn_feature = word_in
             for idx in range(self.cnn_layer):
                 if self.use_idcnn:
@@ -1111,7 +1112,8 @@ class WordSequence(nn.Module):
                         cnn_feature = self.dcnn_drop_list[idx][i](cnn_feature)
                         cnn_feature = self.dcnn_batchnorm_list[idx][i](cnn_feature)
                 elif self.use_sepcnn:
-                    residual = cnn_feature
+                    # BTC: residual
+                    residual = cnn_feature.transpose(2, 1).contiguous()
                     cnn_feature = F.relu(
                         self.pointwise_cnn_list[idx](
                             F.relu(self.depthwise_cnn_list[idx](cnn_feature))
@@ -1120,10 +1122,12 @@ class WordSequence(nn.Module):
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
                     cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
                     # residual connection
-                    cnn_feature = cnn_feature.transpose(2, 1).contiguous()
-                    cnn_feature = self.conv2word_list[idx](cnn_feature)
-                    cnn_feature = residual + cnn_feature
+                    # BTC: residual: cnn_out
+                    cnn_out = cnn_feature.transpose(2, 1).contiguous()
+                    cnn_out = self.conv2word_list[idx](cnn_out)
+                    cnn_feature = residual + cnn_out
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
+                    # BTC->BCT: cnn_feature
                     cnn_feature = cnn_feature.transpose(2, 1).contiguous()
                 else:
                     cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
