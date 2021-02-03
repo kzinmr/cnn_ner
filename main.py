@@ -901,6 +901,7 @@ class LightConvEncoderLayer(nn.Module):
         padding = kernel_size // 2 if kernel_size % 2 == 1 else (kernel_size - 1) // 2
 
         if encoder_glu:
+            # FIXME: BCT-shape
             self.linear1 = nn.Linear(self.embed_dim, 2 * self.conv_dim)
             self.act = nn.GLU()
         else:
@@ -930,13 +931,13 @@ class LightConvEncoderLayer(nn.Module):
         #     raise NotImplementedError
         self.linear2 = nn.Linear(self.conv_dim, self.embed_dim)
         self.dropout_module = nn.Dropout(dropout)
-        ## residual connection
-        self.relu_dropout_module = nn.Dropout(relu_dropout)
         self.input_dropout_module = nn.Dropout(input_dropout)
-        self.fc1 = nn.Linear(self.embed_dim, encoder_ffn_embed_dim)
-        self.fc2 = nn.Linear(encoder_ffn_embed_dim, self.embed_dim)
+        ## residual connection
+        # self.relu_dropout_module = nn.Dropout(relu_dropout)
+        # self.fc1 = nn.Linear(self.embed_dim, encoder_ffn_embed_dim)
+        # self.fc2 = nn.Linear(encoder_ffn_embed_dim, self.embed_dim)
         self.layer_norm_conv = nn.LayerNorm(self.conv_dim)
-        self.layer_norm = nn.LayerNorm(self.embed_dim)
+        # self.layer_norm = nn.LayerNorm(self.embed_dim)
         # self.normalize_before = encoder_normalize_before
         # self.layer_norms = nn.ModuleList(
         #     [nn.LayerNorm(self.embed_dim) for _ in range(2)]
@@ -963,8 +964,8 @@ class LightConvEncoderLayer(nn.Module):
         # if encoder_padding_mask is not None:
         #     x = x.masked_fill(encoder_padding_mask.transpose(0, 1).unsqueeze(2), 0)
         x = self.conv.forward(x)
-        x = self.layer_norm_conv(x)  # added
         x = x.transpose(2, 1).contiguous()
+        x = self.layer_norm_conv(x)  # added
         x = self.linear2(x)
         x = self.dropout_module(x)
         x = residual + x
@@ -1100,7 +1101,6 @@ class WordSequence(nn.Module):
                             dropout=dropout,
                             relu_dropout=0.0,
                             input_dropout=0.,
-                            encoder_glu=True,
                             weight_softmax=False,
                         )
                         for idx in range(self.cnn_layer)
