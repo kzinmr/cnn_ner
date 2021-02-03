@@ -1117,8 +1117,8 @@ class WordSequence(nn.Module):
                 cnn_feature = word_represent
                 for idx in range(self.cnn_layer):
                     # BTC: for linear, residual
-                    cnn_feature = self.word2conv_list[idx](cnn_feature)
                     residual = cnn_feature
+                    cnn_feature = self.word2conv_list[idx](cnn_feature)
                     # BCT: for conv
                     cnn_feature = cnn_feature.transpose(2, 1).contiguous()
                     cnn_feature = F.relu(self.depthwise_cnn_list[idx](cnn_feature))
