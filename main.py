@@ -790,6 +790,211 @@ class WordRep(nn.Module):
         return word_represent
 
 
+class LightweightConv1d(nn.Module):
+    """Lightweight Convolution assuming the input is BxCxT
+    This is just an example that explains LightConv clearer than the TBC version.
+    We don't use this module in the model.
+    Args:
+        input_size: # of channels of the input and output
+        kernel_size: convolution channels
+        padding: padding
+        num_heads: number of heads used. The weight is of shape
+            `(num_heads, 1, kernel_size)`
+        weight_softmax: normalize the weight with softmax before the convolution
+    Shape:
+        Input: BxCxT, i.e. (batch_size, input_size, timesteps)
+        Output: BxCxT, i.e. (batch_size, input_size, timesteps)
+    Attributes:
+        weight: the learnable weights of the module of shape
+            `(num_heads, 1, kernel_size)`
+        bias: the learnable bias of the module of shape `(input_size)`
+    """
+
+    def __init__(
+        self,
+        input_size,
+        kernel_size=1,
+        padding=0,
+        num_heads=1,
+        weight_softmax=False,
+        bias=False,
+        weight_dropout=0.0,
+    ):
+        super().__init__()
+        self.input_size = input_size
+        self.kernel_size = kernel_size
+        self.num_heads = num_heads
+        self.padding = padding
+        self.weight_softmax = weight_softmax
+        self.weight = nn.Parameter(torch.Tensor(num_heads, 1, kernel_size))
+
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(input_size))
+        else:
+            self.bias = None
+        self.weight_dropout_module = nn.Dropout(weight_dropout)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.weight)
+        if self.bias is not None:
+            nn.init.constant_(self.bias, 0.0)
+
+    def forward(self, input):
+        """
+        input size: B x C x T
+        output size: B x C x T
+        """
+        B, C, T = input.size()
+        H = self.num_heads
+
+        weight = self.weight
+        if self.weight_softmax:
+            weight = F.softmax(weight, dim=-1)
+
+        weight = self.weight_dropout_module(weight)
+        # Merge every C/H entries into the batch dimension (C = self.input_size)
+        # B x C x T -> (B * C/H) x H x T
+        # One can also expand the weight to C x 1 x K by a factor of C/H
+        # and do not reshape the input instead, which is slow though
+        input = input.view(-1, H, T)
+        output = F.conv1d(input, weight, padding=self.padding, groups=self.num_heads)
+        output = output.view(B, C, T)
+        if self.bias is not None:
+            output = output + self.bias.view(1, -1, 1)
+
+        return output
+
+
+class LightConvEncoderLayer(nn.Module):
+    """Encoder layer block.
+    Args:
+        args (argparse.Namespace): parsed command-line arguments
+        kernel_size: kernel size of the convolution
+    """
+
+    def __init__(
+        self,
+        encoder_embed_dim: int = 512,
+        encoder_conv_dim: int = 1024,
+        encoder_ffn_embed_dim: int = 4096,
+        kernel_size: int = 3,
+        encoder_attention_heads: int = 4,
+        weight_dropout: float = 0.1,
+        dropout: float = 0.1,
+        relu_dropout: float = 0.0,
+        input_dropout: float = 0.1,
+        encoder_glu: bool = False,
+        weight_softmax: bool = False,
+        encoder_normalize_before: bool = False,
+        # encoder_conv_type == "lightweight",
+    ):
+        super().__init__()
+        self.embed_dim = encoder_embed_dim
+        self.conv_dim = encoder_conv_dim
+        # padding_l = (
+        #     kernel_size // 2
+        #     if kernel_size % 2 == 1
+        #     else ((kernel_size - 1) // 2, kernel_size // 2)
+        # )
+        padding = kernel_size // 2 if kernel_size % 2 == 1 else (kernel_size - 1) // 2
+
+        if encoder_glu:
+            self.linear1 = nn.Linear(self.embed_dim, 2 * self.conv_dim)
+            self.act = nn.GLU()
+        else:
+            self.linear1 = nn.Linear(self.embed_dim, self.conv_dim)
+            self.act = None
+        # if encoder_conv_type == "lightweight":
+        ## BCT-shape: (batch, embed_dim, seq_len)
+        self.conv = LightweightConv1d(
+            self.conv_dim,
+            kernel_size,
+            padding=padding,
+            # padding_l=padding_l,
+            weight_softmax=weight_softmax,
+            num_heads=encoder_attention_heads,
+            weight_dropout=weight_dropout,
+        )
+        # elif args.encoder_conv_type == "dynamic":
+        #     self.conv = DynamicConv(
+        #         self.conv_dim,
+        #         kernel_size,
+        #         padding_l=padding_l,
+        #         weight_softmax=args.weight_softmax,
+        #         num_heads=args.encoder_attention_heads,
+        #         weight_dropout=args.weight_dropout,
+        #     )
+        # else:
+        #     raise NotImplementedError
+        self.linear2 = nn.Linear(self.conv_dim, self.embed_dim)
+
+        self.dropout_module = nn.Dropout(dropout)
+        self.relu_dropout_module = nn.Dropout(relu_dropout)
+        self.input_dropout_module = nn.Dropout(input_dropout)
+        self.normalize_before = encoder_normalize_before
+        self.fc1 = nn.Linear(self.embed_dim, encoder_ffn_embed_dim)
+        self.fc2 = nn.Linear(encoder_ffn_embed_dim, self.embed_dim)
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(self.embed_dim) for _ in range(2)]
+        )
+
+    def forward(self, x, encoder_padding_mask=None):
+        """
+        Args:
+            x (Tensor): input to the layer of shape BCT:`(batch, embed_dim, seq_len)`
+            (originally TBC:`(seq_len, batch, embed_dim)`)
+            encoder_padding_mask (ByteTensor): binary ByteTensor of shape
+                `(batch, src_len)` where padding elements are indicated by ``1``.
+        Returns:
+            encoded output of shape `(batch, src_len, embed_dim)`
+        """
+        residual = x
+        x = self.maybe_layer_norm(0, x, before=True)
+        x = self.input_dropout_module(x)
+        x = self.linear1(x)
+        if self.act is not None:
+            x = self.act(x)
+        
+        ## BCT or TBC part
+        # if encoder_padding_mask is not None:
+        #     x = x.masked_fill(encoder_padding_mask.transpose(0, 1).unsqueeze(2), 0)
+        x = self.conv.forward(x)
+
+        x = self.linear2(x)
+        x = self.dropout_module(x)
+        x = residual + x
+        x = self.maybe_layer_norm(0, x, after=True)
+
+        residual = x
+        x = self.maybe_layer_norm(1, x, before=True)
+        x = F.relu(self.fc1(x))
+        x = self.relu_dropout_module(x)
+        x = self.fc2(x)
+        x = self.dropout_module(x)
+        x = residual + x
+        x = self.maybe_layer_norm(1, x, after=True)
+        return x
+
+    def maybe_layer_norm(self, i, x, before=False, after=False):
+        assert before ^ after
+        if after ^ self.normalize_before:
+            return self.layer_norms[i](x)
+        else:
+            return x
+
+    def extra_repr(self):
+        return (
+            "dropout={}, relu_dropout={}, input_dropout={}, normalize_before={}".format(
+                self.dropout_module.p,
+                self.relu_dropout_module.p,
+                self.input_dropout_module.p,
+                self.normalize_before,
+            )
+        )
+
+
 class WordSequence(nn.Module):
     def __init__(
         self,
@@ -867,116 +1072,145 @@ class WordSequence(nn.Module):
                     batch_first=True,
                     bidirectional=self.bilstm_flag,
                 )
+
+            self.hidden2tag = nn.Linear(self.hidden_dim, label_alphabet_size)
         else:  # elif self.word_feature_extractor == "CNN":
-            if self.word_dropout_rate > 0:
-                self.word_dropout = WordDropout(self.word_dropout_rate)
-            self.word2cnn = nn.Linear(self.input_size, self.hidden_dim)
             self.cnn_layer = cnn_layer
             print("CNN layer: ", self.cnn_layer)
             self.use_idcnn = use_idcnn
             self.use_sepcnn = use_sepcnn
             self.cnn_kernel = cnn_kernel
-            if self.use_idcnn:
-                self.cnn_list = nn.ModuleList()
-                self.cnn_drop_list = nn.ModuleList()
-                self.cnn_batchnorm_list = nn.ModuleList()
-                self.dcnn_drop_list = nn.ModuleList()
-                self.dcnn_batchnorm_list = nn.ModuleList()
-                self.dilations = [1, 2, 1]
-                for idx in range(self.cnn_layer):
-                    dcnn = nn.ModuleList()
-                    dcnn_drop = nn.ModuleList()
-                    dcnn_batchnorm = nn.ModuleList()
-                    for i, dilation in enumerate(self.dilations):
-                        pad_size = self.cnn_kernel // 2 + dilation - 1
-                        dcnn.append(
-                            nn.Conv1d(
-                                in_channels=self.hidden_dim,
-                                out_channels=self.hidden_dim,
-                                kernel_size=self.cnn_kernel,
-                                dilation=dilation,
-                                padding=pad_size,
-                            )
-                        )
-                        dcnn_drop.append(nn.Dropout(self.dropout_rate))
-                        dcnn_batchnorm.append(nn.BatchNorm1d(self.hidden_dim))
-                    self.dcnn_drop_list.append(dcnn_drop)
-                    self.dcnn_batchnorm_list.append(dcnn_batchnorm)
-                    self.cnn_list.append(dcnn)
-                    self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
-                    self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
-            elif self.use_sepcnn:
-                self.depthwise_cnn_list = nn.ModuleList()
-                self.pointwise_cnn_list = nn.ModuleList()
-                self.cnn_drop_list = nn.ModuleList()
-                self.cnn_batchnorm_list = nn.ModuleList()
-                pad_size = int((self.cnn_kernel - 1) / 2)
-                for idx in range(self.cnn_layer):
-                    self.depthwise_cnn_list.append(
-                        nn.Conv1d(
-                            self.hidden_dim,
-                            self.hidden_dim,
-                            kernel_size=self.cnn_kernel,
-                            padding=pad_size,
-                            groups=self.hidden_dim,
-                        )
-                    )
-                    self.pointwise_cnn_list.append(
-                        nn.Conv1d(
-                            self.hidden_dim,
-                            self.hidden_dim,
-                            kernel_size=1,
-                        )
-                    )
-                    self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
-                    self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
-            else:
-                # Sequentialでやるとloss発散
-                self.cnn_list = nn.ModuleList()
-                self.cnn_drop_list = nn.ModuleList()
-                self.cnn_batchnorm_list = nn.ModuleList()
-                pad_size = int((self.cnn_kernel - 1) / 2)
-                for idx in range(self.cnn_layer):
-                    self.cnn_list.append(
-                        nn.Conv1d(
-                            self.hidden_dim,
-                            self.hidden_dim,
-                            kernel_size=self.cnn_kernel,
-                            padding=pad_size,
-                        )
-                    )
-                    self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
-                    self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
 
-        # The linear layer that maps from hidden state space to tag space
-        self.hidden2tag = nn.Linear(self.hidden_dim, label_alphabet_size)
+            self.word_dropout = WordDropout(self.word_dropout_rate)
+
+            if self.use_sepcnn:
+                # LightConv(group-depthwise+pointwise CNN) + ResidualConnection
+                self.cnn_list = nn.ModuleList(
+                    [
+                        LightConvEncoderLayer(
+                            encoder_embed_dim=self.input_size,
+                            encoder_conv_dim=self.hidden_dim,
+                            encoder_ffn_embed_dim=self.hidden_dim * 2,
+                            kernel_size=self.cnn_kernel,
+                            encoder_attention_heads=self.hidden_dim,
+                            weight_dropout=dropout,
+                            dropout=dropout,
+                            relu_dropout=0.0,
+                            input_dropout=dropout,
+                            encoder_glu=False,
+                            weight_softmax=False,
+                            encoder_normalize_before=False,
+                        )
+                        for idx in range(self.cnn_layer)
+                    ]
+                )
+                self.hidden2tag = nn.Linear(self.input_size, label_alphabet_size)
+            else:
+                self.word2cnn = nn.Linear(self.input_size, self.hidden_dim)
+                if self.use_idcnn:
+                    self.cnn_list = nn.ModuleList()
+                    self.cnn_drop_list = nn.ModuleList()
+                    self.cnn_batchnorm_list = nn.ModuleList()
+                    self.dcnn_drop_list = nn.ModuleList()
+                    self.dcnn_batchnorm_list = nn.ModuleList()
+                    self.dilations = [1, 2, 1]
+                    for idx in range(self.cnn_layer):
+                        dcnn = nn.ModuleList()
+                        dcnn_drop = nn.ModuleList()
+                        dcnn_batchnorm = nn.ModuleList()
+                        for i, dilation in enumerate(self.dilations):
+                            pad_size = self.cnn_kernel // 2 + dilation - 1
+                            dcnn.append(
+                                nn.Conv1d(
+                                    in_channels=self.hidden_dim,
+                                    out_channels=self.hidden_dim,
+                                    kernel_size=self.cnn_kernel,
+                                    dilation=dilation,
+                                    padding=pad_size,
+                                )
+                            )
+                            dcnn_drop.append(nn.Dropout(self.dropout_rate))
+                            dcnn_batchnorm.append(nn.BatchNorm1d(self.hidden_dim))
+                        self.dcnn_drop_list.append(dcnn_drop)
+                        self.dcnn_batchnorm_list.append(dcnn_batchnorm)
+                        self.cnn_list.append(dcnn)
+                        self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
+                        self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
+                # elif self.use_sepcnn:
+                #     self.depthwise_cnn_list = nn.ModuleList()
+                #     self.pointwise_cnn_list = nn.ModuleList()
+                #     self.cnn_drop_list = nn.ModuleList()
+                #     self.cnn_batchnorm_list = nn.ModuleList()
+                #     pad_size = int((self.cnn_kernel - 1) / 2)
+                #     for idx in range(self.cnn_layer):
+                #         self.depthwise_cnn_list.append(
+                #             nn.Conv1d(
+                #                 self.hidden_dim,
+                #                 self.hidden_dim,
+                #                 kernel_size=self.cnn_kernel,
+                #                 padding=pad_size,
+                #                 groups=self.hidden_dim,
+                #             )
+                #         )
+                #         self.pointwise_cnn_list.append(
+                #             nn.Conv1d(
+                #                 self.hidden_dim,
+                #                 self.hidden_dim,
+                #                 kernel_size=1,
+                #             )
+                #         )
+                #         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
+                #         self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
+                else:
+                    self.cnn_list = nn.ModuleList()
+                    if not self.use_sepcnn:
+                        self.cnn_drop_list = nn.ModuleList()
+                    self.cnn_batchnorm_list = nn.ModuleList()
+                    pad_size = int((self.cnn_kernel - 1) / 2)
+                    for idx in range(self.cnn_layer):
+                        cnn = nn.Conv1d(
+                            self.hidden_dim,
+                            self.hidden_dim,
+                            kernel_size=self.cnn_kernel,
+                            padding=pad_size,
+                        )
+                        self.cnn_list.append(cnn)
+                        self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
+                        self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
+
+                self.hidden2tag = nn.Linear(self.hidden_dim, label_alphabet_size)
 
         if self.gpu:
             self.hidden2tag = self.hidden2tag.cuda()
             if self.word_feature_extractor == "CNN":
-                self.word2cnn = self.word2cnn.cuda()
-                # self.cnn = self.cnn.cuda()
-                for idx in range(self.cnn_layer):
-                    if self.use_idcnn:
-                        for i, dilation in enumerate(self.dilations):
-                            self.cnn_list[idx][i] = self.cnn_list[idx][i].cuda()
-                            self.dcnn_drop_list[idx][i] = self.dcnn_drop_list[idx][
-                                i
-                            ].cuda()
-                            self.dcnn_batchnorm_list[idx][i] = self.dcnn_batchnorm_list[
-                                idx
-                            ][i].cuda()
-                    elif self.use_sepcnn:
-                        self.depthwise_cnn_list[idx] = self.depthwise_cnn_list[
-                            idx
-                        ].cuda()
-                        self.pointwise_cnn_list[idx] = self.pointwise_cnn_list[
-                            idx
-                        ].cuda()
-                    else:
+                self.word_dropout = self.word_dropout.cuda()
+                if self.use_sepcnn:
+                    for idx in range(self.cnn_layer):
                         self.cnn_list[idx] = self.cnn_list[idx].cuda()
-                    self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                    self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].cuda()
+                else:
+                    self.word2cnn = self.word2cnn.cuda()
+                    # self.cnn = self.cnn.cuda()
+                    for idx in range(self.cnn_layer):
+                        if self.use_idcnn:
+                            for i, dilation in enumerate(self.dilations):
+                                self.cnn_list[idx][i] = self.cnn_list[idx][i].cuda()
+                                self.dcnn_drop_list[idx][i] = self.dcnn_drop_list[idx][
+                                    i
+                                ].cuda()
+                                self.dcnn_batchnorm_list[idx][i] = self.dcnn_batchnorm_list[
+                                    idx
+                                ][i].cuda()
+                        # elif self.use_sepcnn:
+                        #     self.depthwise_cnn_list[idx] = self.depthwise_cnn_list[
+                        #         idx
+                        #     ].cuda()
+                        #     self.pointwise_cnn_list[idx] = self.pointwise_cnn_list[
+                        #         idx
+                        #     ].cuda()
+                        else:
+                            self.cnn_list[idx] = self.cnn_list[idx].cuda()
+                        self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
+                        self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].cuda()
             else:
                 self.droplstm = self.droplstm.cuda()
                 self.lstm = self.lstm.cuda()
@@ -1010,35 +1244,39 @@ class WordSequence(nn.Module):
             char_seq_lengths,
             char_seq_recover,
         )
-        ## word_embs (batch_size, seq_len, embed_size)
+        ## BTC-shape: (batch_size, seq_len, embed_size)
         if self.word_feature_extractor == "CNN":
-            word_in = (
-                torch.tanh(self.word2cnn(word_represent)).transpose(2, 1).contiguous()
-            )
-            # feature_out = self.cnn(word_in).transpose(2,1).contiguous()
+            if self.use_sepcnn:
+                cnn_feature = word_represent.transpose(2, 1).contiguous()
+                for idx in range(self.cnn_layer):
+                    cnn_feature = self.cnn_list[idx](cnn_feature)
+                feature_out = cnn_feature.transpose(2, 1).contiguous()
+            else:
+                word_in = (
+                    torch.tanh(self.word2cnn(word_represent)).transpose(2, 1).contiguous()
+                )
+                cnn_feature = word_in
+                for idx in range(self.cnn_layer):
+                    if self.use_idcnn:
+                        for i, dilation in enumerate(self.dilations):
+                            cnn_feature = F.relu(self.cnn_list[idx][i](cnn_feature))
+                            cnn_feature = self.dcnn_drop_list[idx][i](cnn_feature)
+                            cnn_feature = self.dcnn_batchnorm_list[idx][i](cnn_feature)
+                    # elif self.use_sepcnn:
+                    #     cnn_feature = F.relu(
+                    #         self.pointwise_cnn_list[idx](
+                    #             F.relu(
+                    #                 self.depthwise_cnn_list[idx](cnn_feature)
+                    #             )
+                    #         )
+                    #     )
+                    else:
+                        cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
 
-            cnn_feature = word_in
-            for idx in range(self.cnn_layer):
-                if self.use_idcnn:
-                    for i, dilation in enumerate(self.dilations):
-                        cnn_feature = F.relu(self.cnn_list[idx][i](cnn_feature))
-                        cnn_feature = self.dcnn_drop_list[idx][i](cnn_feature)
-                        cnn_feature = self.dcnn_batchnorm_list[idx][i](cnn_feature)
-                elif self.use_sepcnn:
-                    cnn_feature = F.relu(
-                        self.pointwise_cnn_list[idx](
-                            F.relu(
-                                self.depthwise_cnn_list[idx](cnn_feature)
-                            )
-                        )
-                    )
-                else:
-                    cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
+                    cnn_feature = self.cnn_drop_list[idx](cnn_feature)
+                    cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
 
-                cnn_feature = self.cnn_drop_list[idx](cnn_feature)
-                cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
-
-            feature_out = cnn_feature.transpose(2, 1).contiguous()
+                feature_out = cnn_feature.transpose(2, 1).contiguous()
 
         else:
             packed_words = pack_padded_sequence(
