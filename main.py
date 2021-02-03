@@ -929,16 +929,18 @@ class LightConvEncoderLayer(nn.Module):
         # else:
         #     raise NotImplementedError
         self.linear2 = nn.Linear(self.conv_dim, self.embed_dim)
-
         self.dropout_module = nn.Dropout(dropout)
+        ## residual connection
         self.relu_dropout_module = nn.Dropout(relu_dropout)
         self.input_dropout_module = nn.Dropout(input_dropout)
-        self.normalize_before = encoder_normalize_before
         self.fc1 = nn.Linear(self.embed_dim, encoder_ffn_embed_dim)
         self.fc2 = nn.Linear(encoder_ffn_embed_dim, self.embed_dim)
-        self.layer_norms = nn.ModuleList(
-            [nn.LayerNorm(self.embed_dim) for _ in range(2)]
-        )
+        self.layer_norm_conv = nn.LayerNorm(self.conv_dim)
+        self.layer_norm = nn.LayerNorm(self.embed_dim)
+        # self.normalize_before = encoder_normalize_before
+        # self.layer_norms = nn.ModuleList(
+        #     [nn.LayerNorm(self.embed_dim) for _ in range(2)]
+        # )
 
     def forward(self, x, encoder_padding_mask=None):
         """
@@ -961,28 +963,29 @@ class LightConvEncoderLayer(nn.Module):
         # if encoder_padding_mask is not None:
         #     x = x.masked_fill(encoder_padding_mask.transpose(0, 1).unsqueeze(2), 0)
         x = self.conv.forward(x)
+        x = self.layer_norm_conv(x)  # added
         x = x.transpose(2, 1).contiguous()
         x = self.linear2(x)
         x = self.dropout_module(x)
         x = residual + x
-        x = self.maybe_layer_norm(0, x, after=True)
+        # x = self.maybe_layer_norm(0, x, after=True)
 
-        residual = x
-        x = self.maybe_layer_norm(1, x, before=True)
-        x = F.relu(self.fc1(x))
-        x = self.relu_dropout_module(x)
-        x = self.fc2(x)
-        x = self.dropout_module(x)
-        x = residual + x
-        x = self.maybe_layer_norm(1, x, after=True)
+        # residual = x
+        # x = self.maybe_layer_norm(1, x, before=True)
+        # x = F.relu(self.fc1(x))
+        # x = self.relu_dropout_module(x)
+        # x = self.fc2(x)
+        # x = self.dropout_module(x)
+        # x = residual + x
+        # x = self.maybe_layer_norm(1, x, after=True)
         return x
 
-    def maybe_layer_norm(self, i, x, before=False, after=False):
-        assert before ^ after
-        if after ^ self.normalize_before:
-            return self.layer_norms[i](x)
-        else:
-            return x
+    # def maybe_layer_norm(self, i, x, before=False, after=False):
+    #     assert before ^ after
+    #     if after ^ self.normalize_before:
+    #         return self.layer_norms[i](x)
+    #     else:
+    #         return x
 
     def extra_repr(self):
         return (
@@ -1093,13 +1096,12 @@ class WordSequence(nn.Module):
                             encoder_ffn_embed_dim=self.hidden_dim * 2,
                             kernel_size=self.cnn_kernel,
                             encoder_attention_heads=self.hidden_dim,
-                            weight_dropout=dropout,
+                            weight_dropout=0.1,
                             dropout=dropout,
                             relu_dropout=0.0,
-                            input_dropout=dropout,
-                            encoder_glu=False,
+                            input_dropout=0.,
+                            encoder_glu=True,
                             weight_softmax=False,
-                            encoder_normalize_before=False,
                         )
                         for idx in range(self.cnn_layer)
                     ]
