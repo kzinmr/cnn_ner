@@ -1098,13 +1098,10 @@ class WordSequence(nn.Module):
         ## word_embs (batch_size, seq_len, embed_size)
         if self.word_feature_extractor == "CNN":
             # word_represent = self.word_dropout.forward(word_represent)
-            word_in = (
-                torch.tanh(self.word2cnn(word_represent)).transpose(2, 1).contiguous()
-            )
-            # feature_out = self.cnn(word_in).transpose(2,1).contiguous()
-
-            # BCT: cnn_feature
-            cnn_feature = word_in
+            # BTC: word_represent
+            word_in = torch.tanh(self.word2cnn(word_represent))
+            # BCT: for conv
+            cnn_feature = word_in.transpose(2, 1).contiguous()
             for idx in range(self.cnn_layer):
                 if self.use_idcnn:
                     for i, dilation in enumerate(self.dilations):
@@ -1122,15 +1119,18 @@ class WordSequence(nn.Module):
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
                     cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
                     # residual connection
-                    # BCT: residual: cnn_out
+                    # BTC for linear
+                    cnn_feature = cnn_feature.transpose(2, 1).contiguous()
                     cnn_feature = self.conv2word_list[idx](cnn_feature)
+                    cnn_feature = cnn_feature.transpose(2, 1).contiguous()
+                    # BCT: residual, cnn_feature
                     cnn_feature = residual + cnn_feature
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
                 else:
                     cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
                     cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
-            # BCT -> BTC
+            # BTC for linear
             feature_out = cnn_feature.transpose(2, 1).contiguous()
         else:
             packed_words = pack_padded_sequence(
