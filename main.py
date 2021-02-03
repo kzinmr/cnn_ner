@@ -1011,7 +1011,7 @@ class WordSequence(nn.Module):
                     self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                     self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
                     self.conv2word_list.append(
-                        nn.Linear(self.conv_dim, self.input_size)
+                        nn.Linear(self.hidden_dim, self.input_size)
                     )
                 self.hidden2tag = nn.Linear(self.input_size, label_alphabet_size)
             else:
