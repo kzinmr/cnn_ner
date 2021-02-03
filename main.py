@@ -890,6 +890,7 @@ class WordSequence(nn.Module):
         pretrain_word_embedding: Optional[np.array] = None,
         gpu: bool = False,
         use_sepcnn_rc: bool = False,
+        use_batchnorm: bool = True,
     ):
         super(WordSequence, self).__init__()
         print("build word sequence feature extractor: %s..." % (word_feature_extractor))
@@ -951,6 +952,7 @@ class WordSequence(nn.Module):
             self.use_idcnn = use_idcnn
             self.use_sepcnn = use_sepcnn
             self.use_sepcnn_rc = use_sepcnn_rc
+            self.use_bn = use_batchnorm
             self.cnn_kernel = cnn_kernel
             self.word_dropout = WordDropout(self.word_dropout_rate)
             if self.use_sepcnn_rc:
@@ -961,8 +963,8 @@ class WordSequence(nn.Module):
                     self.pointwise_cnn_list = nn.ModuleList()
                     self.conv2word_list = nn.ModuleList()
                     self.cnn_drop_list = nn.ModuleList()
-                    self.depthwise_cnn_batchnorm_list = nn.ModuleList()
-                    self.pointwise_cnn_batchnorm_list = nn.ModuleList()
+                    self.depthwise_cnn_norm_list = nn.ModuleList()
+                    self.pointwise_cnn_norm_list = nn.ModuleList()
                     pad_size = int((self.cnn_kernel - 1) / 2)
                     for idx in range(self.cnn_layer):
                         self.word2conv_list.append(
@@ -986,11 +988,11 @@ class WordSequence(nn.Module):
                             )
                         )
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
-                        self.depthwise_cnn_batchnorm_list.append(
-                            nn.BatchNorm1d(self.hidden_dim)
+                        self.depthwise_cnn_norm_list.append(
+                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
                         )
-                        self.pointwise_cnn_batchnorm_list.append(
-                            nn.BatchNorm1d(self.hidden_dim)
+                        self.pointwise_cnn_norm_list.append(
+                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
                         )
                         self.conv2word_list.append(
                             nn.Linear(self.hidden_dim, self.input_size)
@@ -1001,7 +1003,7 @@ class WordSequence(nn.Module):
                 if self.use_idcnn:
                     self.cnn_list = nn.ModuleList()
                     self.cnn_drop_list = nn.ModuleList()
-                    self.cnn_batchnorm_list = nn.ModuleList()
+                    self.cnn_norm_list = nn.ModuleList()
                     self.dcnn_drop_list = nn.ModuleList()
                     self.dcnn_batchnorm_list = nn.ModuleList()
                     self.dilations = [1, 2, 1]
@@ -1026,12 +1028,15 @@ class WordSequence(nn.Module):
                         self.dcnn_batchnorm_list.append(dcnn_batchnorm)
                         self.cnn_list.append(dcnn)
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
-                        self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
+                        self.cnn_norm_list.append(
+                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                        )
                 elif self.use_sepcnn:
                     self.depthwise_cnn_list = nn.ModuleList()
                     self.pointwise_cnn_list = nn.ModuleList()
                     self.cnn_drop_list = nn.ModuleList()
-                    self.cnn_batchnorm_list = nn.ModuleList()
+                    self.depthwise_cnn_norm_list = nn.ModuleList()
+                    self.pointwise_cnn_norm_list = nn.ModuleList()
                     pad_size = int((self.cnn_kernel - 1) / 2)
                     for idx in range(self.cnn_layer):
                         self.depthwise_cnn_list.append(
@@ -1051,12 +1056,17 @@ class WordSequence(nn.Module):
                             )
                         )
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
-                        self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
+                        self.depthwise_cnn_norm_list.append(
+                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                        )
+                        self.pointwise_cnn_norm_list.append(
+                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                        )
                 else:
                     # Sequentialでやるとloss発散
                     self.cnn_list = nn.ModuleList()
                     self.cnn_drop_list = nn.ModuleList()
-                    self.cnn_batchnorm_list = nn.ModuleList()
+                    self.cnn_norm_list = nn.ModuleList()
                     pad_size = int((self.cnn_kernel - 1) / 2)
                     for idx in range(self.cnn_layer):
                         self.cnn_list.append(
@@ -1068,7 +1078,9 @@ class WordSequence(nn.Module):
                             )
                         )
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
-                        self.cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
+                        self.cnn_norm_list.append(
+                            nn.BatchNorm1d(self.hidden_dim) if self.use_bn else nn.GroupNorm(1, self.hidden_dim)
+                        )
 
                 self.hidden2tag = nn.Linear(self.hidden_dim, label_alphabet_size)
 
@@ -1088,12 +1100,12 @@ class WordSequence(nn.Module):
                         ].cuda()
                         self.conv2word_list[idx] = self.conv2word_list[idx].cuda()
                         self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                        self.depthwise_cnn_batchnorm_list[
+                        self.depthwise_cnn_norm_list[
                             idx
-                        ] = self.depthwise_cnn_batchnorm_list[idx].cuda()
-                        self.pointwise_cnn_batchnorm_list[
+                        ] = self.depthwise_cnn_norm_list[idx].cuda()
+                        self.pointwise_cnn_norm_list[
                             idx
-                        ] = self.pointwise_cnn_batchnorm_list[idx].cuda()
+                        ] = self.pointwise_cnn_norm_list[idx].cuda()
                 else:
                     self.word_dropout = self.word_dropout.cuda()
                     self.word2cnn = self.word2cnn.cuda()
@@ -1107,6 +1119,10 @@ class WordSequence(nn.Module):
                                 self.dcnn_batchnorm_list[idx][
                                     i
                                 ] = self.dcnn_batchnorm_list[idx][i].cuda()
+                            self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
+                            self.cnn_norm_list[idx] = self.cnn_norm_list[
+                                idx
+                            ].cuda()
                         elif self.use_sepcnn:
                             self.depthwise_cnn_list[idx] = self.depthwise_cnn_list[
                                 idx
@@ -1114,12 +1130,19 @@ class WordSequence(nn.Module):
                             self.pointwise_cnn_list[idx] = self.pointwise_cnn_list[
                                 idx
                             ].cuda()
+                            self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
+                            self.depthwise_cnn_norm_list[idx] = self.depthwise_cnn_norm_list[
+                                idx
+                            ].cuda()
+                            self.pointwise_cnn_norm_list[idx] = self.pointwise_cnn_norm_list[
+                                idx
+                            ].cuda()
                         else:
                             self.cnn_list[idx] = self.cnn_list[idx].cuda()
-                        self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                        self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[
-                            idx
-                        ].cuda()
+                            self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
+                            self.cnn_norm_list[idx] = self.cnn_norm_list[
+                                idx
+                            ].cuda()
             else:
                 self.droplstm = self.droplstm.cuda()
                 self.lstm = self.lstm.cuda()
@@ -1166,9 +1189,9 @@ class WordSequence(nn.Module):
                     # BCT: for conv
                     cnn_feature = cnn_feature.transpose(2, 1).contiguous()
                     cnn_feature = F.relu(self.depthwise_cnn_list[idx](cnn_feature))
-                    cnn_feature = self.depthwise_cnn_batchnorm_list[idx](cnn_feature)
+                    cnn_feature = self.depthwise_cnn_norm_list[idx](cnn_feature)
                     cnn_feature = F.relu(self.pointwise_cnn_list[idx](cnn_feature))
-                    cnn_feature = self.pointwise_cnn_batchnorm_list[idx](cnn_feature)
+                    cnn_feature = self.pointwise_cnn_norm_list[idx](cnn_feature)
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
 
                     # residual connection
@@ -1192,13 +1215,15 @@ class WordSequence(nn.Module):
                             cnn_feature = self.dcnn_batchnorm_list[idx][i](cnn_feature)
                     elif self.use_sepcnn:
                         cnn_feature = F.relu(self.depthwise_cnn_list[idx](cnn_feature))
+                        cnn_feature = self.cnn_drop_list[idx](cnn_feature)
+                        cnn_feature = self.depthwise_cnn_norm_list[idx](cnn_feature)
                         cnn_feature = F.relu(self.pointwise_cnn_list[idx](cnn_feature))
                         cnn_feature = self.cnn_drop_list[idx](cnn_feature)
-                        cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
+                        cnn_feature = self.pointwise_cnn_norm_list[idx](cnn_feature)
                     else:
                         cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
                         cnn_feature = self.cnn_drop_list[idx](cnn_feature)
-                        cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
+                        cnn_feature = self.cnn_norm_list[idx](cnn_feature)
                 # BTC for linear
                 feature_out = cnn_feature.transpose(2, 1).contiguous()
         else:
