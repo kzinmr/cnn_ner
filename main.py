@@ -961,8 +961,8 @@ class LightConvEncoderLayer(nn.Module):
         # if encoder_padding_mask is not None:
         #     x = x.masked_fill(encoder_padding_mask.transpose(0, 1).unsqueeze(2), 0)
         x = self.conv.forward(x)
-
-        x = self.linear2(x).transpose(2, 1).contiguous()
+        x = x.transpose(2, 1).contiguous()
+        x = self.linear2(x)
         x = self.dropout_module(x)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
