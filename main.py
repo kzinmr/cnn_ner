@@ -889,7 +889,7 @@ class WordSequence(nn.Module):
         use_bilstm: bool = False,
         pretrain_word_embedding: Optional[np.array] = None,
         gpu: bool = False,
-        use_sepcnn_rc:bool=False,
+        use_sepcnn_rc: bool = False,
     ):
         super(WordSequence, self).__init__()
         print("build word sequence feature extractor: %s..." % (word_feature_extractor))
@@ -951,7 +951,7 @@ class WordSequence(nn.Module):
             self.use_idcnn = use_idcnn
             self.use_sepcnn = use_sepcnn
             self.use_sepcnn_rc = use_sepcnn_rc
-            self.cnn_kernel = cnn_kernel            
+            self.cnn_kernel = cnn_kernel
             self.word_dropout = WordDropout(self.word_dropout_rate)
             if self.use_sepcnn_rc:
                 # word2conv_list
@@ -986,8 +986,12 @@ class WordSequence(nn.Module):
                             )
                         )
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
-                        self.depthwise_cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
-                        self.pointwise_cnn_batchnorm_list.append(nn.BatchNorm1d(self.hidden_dim))
+                        self.depthwise_cnn_batchnorm_list.append(
+                            nn.BatchNorm1d(self.hidden_dim)
+                        )
+                        self.pointwise_cnn_batchnorm_list.append(
+                            nn.BatchNorm1d(self.hidden_dim)
+                        )
                         self.conv2word_list.append(
                             nn.Linear(self.hidden_dim, self.input_size)
                         )
@@ -1084,8 +1088,12 @@ class WordSequence(nn.Module):
                         ].cuda()
                         self.conv2word_list[idx] = self.conv2word_list[idx].cuda()
                         self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                        self.depthwise_cnn_batchnorm_list[idx] = self.depthwise_cnn_batchnorm_list[idx].cuda()
-                        self.pointwise_cnn_batchnorm_list[idx] = self.pointwise_cnn_batchnorm_list[idx].cuda()
+                        self.depthwise_cnn_batchnorm_list[
+                            idx
+                        ] = self.depthwise_cnn_batchnorm_list[idx].cuda()
+                        self.pointwise_cnn_batchnorm_list[
+                            idx
+                        ] = self.pointwise_cnn_batchnorm_list[idx].cuda()
                 else:
                     self.word_dropout = self.word_dropout.cuda()
                     self.word2cnn = self.word2cnn.cuda()
@@ -1096,9 +1104,9 @@ class WordSequence(nn.Module):
                                 self.dcnn_drop_list[idx][i] = self.dcnn_drop_list[idx][
                                     i
                                 ].cuda()
-                                self.dcnn_batchnorm_list[idx][i] = self.dcnn_batchnorm_list[
-                                    idx
-                                ][i].cuda()
+                                self.dcnn_batchnorm_list[idx][
+                                    i
+                                ] = self.dcnn_batchnorm_list[idx][i].cuda()
                         elif self.use_sepcnn:
                             self.depthwise_cnn_list[idx] = self.depthwise_cnn_list[
                                 idx
@@ -1109,7 +1117,9 @@ class WordSequence(nn.Module):
                         else:
                             self.cnn_list[idx] = self.cnn_list[idx].cuda()
                         self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                        self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].cuda()
+                        self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[
+                            idx
+                        ].cuda()
             else:
                 self.droplstm = self.droplstm.cuda()
                 self.lstm = self.lstm.cuda()
@@ -1164,7 +1174,7 @@ class WordSequence(nn.Module):
                     # residual connection
                     # BTC for linear, residual
                     cnn_feature = cnn_feature.transpose(2, 1).contiguous()
-                    cnn_feature =  F.relu(self.conv2word_list[idx](cnn_feature))
+                    cnn_feature = F.relu(self.conv2word_list[idx](cnn_feature))
                     cnn_feature = residual + cnn_feature
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
                 # BTC for linear
@@ -2622,7 +2632,7 @@ class TokenClassificationModule(pl.LightningModule):
             },
         ]
 
-        self.optimizer = torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             optimizer_grouped_parameters,
             lr=self.hparams.learning_rate,
             eps=self.hparams.adam_epsilon,
@@ -2630,18 +2640,20 @@ class TokenClassificationModule(pl.LightningModule):
             weight_decay=self.hparams.weight_decay,
             # amsgrad=False,
         )
-        return {
-            "optimizer": self.optimizer,
-            "lr_scheduler": ReduceLROnPlateau(
-                self.optimizer,
-                mode="min" if self.hparams.monitor == "loss" else "max",
-                factor=self.hparams.anneal_factor,
-                patience=self.hparams.patience,
-                min_lr=1e-5,
-                verbose=True,
-            ),
+        lr_scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode="min" if self.hparams.monitor == "loss" else "max",
+            factor=self.hparams.anneal_factor,
+            patience=self.hparams.patience,
+            min_lr=1e-5,
+            verbose=True,
+        )
+        scheduler = {
+            "lr_scheduler": lr_scheduler,
+            "reduce_on_plateau": True,
             "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
         }
+        return [optimizer], [scheduler]
 
     @staticmethod
     def add_model_specific_args(parent_parser):
