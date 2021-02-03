@@ -1112,8 +1112,8 @@ class WordSequence(nn.Module):
                         cnn_feature = self.dcnn_drop_list[idx][i](cnn_feature)
                         cnn_feature = self.dcnn_batchnorm_list[idx][i](cnn_feature)
                 elif self.use_sepcnn:
-                    # BTC: residual
-                    residual = cnn_feature.transpose(2, 1).contiguous()
+                    # BCT: residual
+                    residual = cnn_feature
                     cnn_feature = F.relu(
                         self.pointwise_cnn_list[idx](
                             F.relu(self.depthwise_cnn_list[idx](cnn_feature))
@@ -1122,18 +1122,15 @@ class WordSequence(nn.Module):
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
                     cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
                     # residual connection
-                    # BTC: residual: cnn_out
-                    cnn_out = cnn_feature.transpose(2, 1).contiguous()
-                    cnn_out = self.conv2word_list[idx](cnn_out)
-                    cnn_feature = residual + cnn_out
+                    # BCT: residual: cnn_out
+                    cnn_feature = self.conv2word_list[idx](cnn_feature)
+                    cnn_feature = residual + cnn_feature
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
-                    # BTC->BCT: cnn_feature
-                    cnn_feature = cnn_feature.transpose(2, 1).contiguous()
                 else:
                     cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
                     cnn_feature = self.cnn_drop_list[idx](cnn_feature)
                     cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
-
+            # BCT -> BTC
             feature_out = cnn_feature.transpose(2, 1).contiguous()
         else:
             packed_words = pack_padded_sequence(
