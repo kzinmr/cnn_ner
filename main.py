@@ -1046,7 +1046,6 @@ class WordSequence(nn.Module):
             if self.word_feature_extractor == "CNN":
                 if self.use_sepcnn:
                     self.word_dropout = self.word_dropout.cuda()
-                    self.word2cnn = self.word2cnn.cuda()
                     # self.cnn = self.cnn.cuda()
                     for idx in range(self.cnn_layer):
                         self.word2conv_list[idx] = self.word2conv_list[idx].cuda()
