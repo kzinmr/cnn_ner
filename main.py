@@ -890,7 +890,7 @@ class WordSequence(nn.Module):
         pretrain_word_embedding: Optional[np.array] = None,
         gpu: bool = False,
         use_sepcnn_rc: bool = False,
-        use_batchnorm: bool = True,
+        use_batchnorm: bool = False,
     ):
         super(WordSequence, self).__init__()
         print("build word sequence feature extractor: %s..." % (word_feature_extractor))
