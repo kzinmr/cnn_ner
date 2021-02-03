@@ -953,7 +953,7 @@ class LightConvEncoderLayer(nn.Module):
         residual = x
         x = self.maybe_layer_norm(0, x, before=True)
         x = self.input_dropout_module(x)
-        x = self.linear1(x)
+        x = self.linear1(x).transpose(2, 1).contiguous()
         if self.act is not None:
             x = self.act(x)
         
@@ -962,7 +962,7 @@ class LightConvEncoderLayer(nn.Module):
         #     x = x.masked_fill(encoder_padding_mask.transpose(0, 1).unsqueeze(2), 0)
         x = self.conv.forward(x)
 
-        x = self.linear2(x)
+        x = self.linear2(x).transpose(2, 1).contiguous()
         x = self.dropout_module(x)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)
@@ -1247,10 +1247,10 @@ class WordSequence(nn.Module):
         ## BTC-shape: (batch_size, seq_len, embed_size)
         if self.word_feature_extractor == "CNN":
             if self.use_sepcnn:
-                cnn_feature = word_represent.transpose(2, 1).contiguous()
+                cnn_feature = word_represent  #.transpose(2, 1).contiguous()
                 for idx in range(self.cnn_layer):
                     cnn_feature = self.cnn_list[idx](cnn_feature)
-                feature_out = cnn_feature.transpose(2, 1).contiguous()
+                feature_out = cnn_feature  #.transpose(2, 1).contiguous()
             else:
                 word_in = (
                     torch.tanh(self.word2cnn(word_represent)).transpose(2, 1).contiguous()
