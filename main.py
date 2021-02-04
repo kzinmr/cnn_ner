@@ -2680,7 +2680,10 @@ class TokenClassificationModule(pl.LightningModule):
         #     min_lr=1e-5,
         #     verbose=True,
         # )
-        lr_scheduler = LambdaLR(optimizer, lr_lambda=[lambda epoch: epoch // 30])
+        lr_scheduler = LambdaLR(
+            optimizer,
+            lr_lambda=[lambda epoch: epoch // 30, lambda epoch: 0.95 ** epoch],
+        )
         scheduler = {
             "scheduler": lr_scheduler,
             "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
