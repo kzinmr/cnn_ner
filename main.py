@@ -1401,69 +1401,50 @@ class Alphabet:
         self.label = label
         if name == "label":
             self.label = True
-        self.instance2index = {}
-        self.instances = []
         self.keep_growing = keep_growing
-
-        # Index 0 is occupied by default, all else following.
-        self._default_index = 0
-        self._next_index = 1  # self.instance2index starts from 1
+        self.instance2index = {self.PAD: 0}
+        self.index2instance = {0: self.PAD}
+        self._next_index = 1
         if not self.label:
             self.add(self.UNKNOWN)
+        else:
+            self.add("O")
 
     def clear(self):
-        self.instance2index = {}
-        self.instances = []
-
-        # Index 0 is occupied by default, all else following.
-        self._default_index = 0
+        self.instance2index = {self.PAD: 0}
+        self.index2instance = {0: self.PAD}
         self._next_index = 1
 
     def add(self, instance):
         if instance not in self.instance2index:
-            self.instances.append(instance)
+            self.index2instance[self._next_index] = instance
             self.instance2index[instance] = self._next_index
             self._next_index += 1
 
     def get_index(self, instance):
         if instance in self.instance2index:
             return self.instance2index[instance]
+        elif self.keep_growing:
+            index = self._next_index
+            self.add(instance)
+            return index
         else:
-            if self.keep_growing:
-                index = self._next_index
-                self.add(instance)
-                return index
-            else:
-                return self.instance2index[self.UNKNOWN]
+            return self.instance2index["O" if self.label else self.UNKNOWN]
 
     def get_instance(self, index: int) -> str:
-        if index == 0:
-            if self.label:
-                return self.instances[0]
-            # First index is occupied by the wildcard element.
-            else:
-                return self.PAD  # originally None
-        if index - 1 < len(self.instances):
-            return self.instances[index - 1]
+        if index in self.index2instance:
+            return self.index2instance[index]
         else:
             print(
-                f"WARNING:Alphabet index {index-1} is out of {len(self.instances)}, return the first label."
+                f"WARNING:Alphabet index {index} is out of {len(self.index2instance)}, return the UNK/O."
             )
-            return self.instances[0]
+            return self.UNKNOWN
 
     def size(self):
-        if self.label:
-            return len(self.instances)
-        else:
-            return len(self.instances) + 1
+        return len(self.index2instance)
 
     def items(self):
         return self.instance2index.items()
-
-    def enumerate_items(self, start=1):
-        if start < 1 or start >= self.size():
-            raise IndexError("Enumerate is allowed between [1 : size of the alphabet)")
-        return zip(range(start, len(self.instances) + 1), self.instances[start - 1 :])
 
     def close(self):
         self.keep_growing = False
@@ -1472,10 +1453,10 @@ class Alphabet:
         self.keep_growing = True
 
     def get_content(self):
-        return {"instance2index": self.instance2index, "instances": self.instances}
+        return {"instance2index": self.instance2index, "index2instance": self.index2instance}
 
     def from_json(self, data):
-        self.instances = data["instances"]
+        self.index2instance = data["index2instance"]
         self.instance2index = data["instance2index"]
 
     def save(self, output_directory, name=None):
@@ -2028,6 +2009,7 @@ class TokenClassificationDataModule(pl.LightningDataModule):
             #     self.feature_alphabets[idx].add(feat_idx)
         time_finish = time.time()
         timecost = time_finish - time_start
+        print(self.label_alphabet.instance2index)
         print(f"End: {timecost / 60.} min.")
 
     def show_data_summary(self):
@@ -2664,7 +2646,7 @@ class TokenClassificationModule(pl.LightningModule):
             },
         ]
 
-        optimizer = torch.optim.AdamW(
+        optimizer = torch.optim.Adam(
             optimizer_grouped_parameters,
             lr=self.hparams.learning_rate,
             eps=self.hparams.adam_epsilon,
@@ -2680,15 +2662,15 @@ class TokenClassificationModule(pl.LightningModule):
         #     min_lr=1e-5,
         #     verbose=True,
         # )
-        lr_scheduler = LambdaLR(
-            optimizer,
-            lr_lambda=[lambda epoch: epoch // 30, lambda epoch: 0.95 ** epoch],
-        )
-        scheduler = {
-            "scheduler": lr_scheduler,
-            "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
-        }
-        return [optimizer], [scheduler]
+        # lr_scheduler = LambdaLR(
+        #     optimizer,
+        #     lr_lambda=[lambda epoch: epoch // 30, lambda epoch: 0.95 ** epoch],
+        # )
+        # scheduler = {
+        #     "scheduler": lr_scheduler,
+        #     "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
+        # }
+        return [optimizer], []
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -2862,11 +2844,11 @@ def main_as_plmodule():
             monitor="val_loss" if argparse_args.monitor == "loss" else "val_f1",
             mode="min" if argparse_args.monitor == "loss" else "max",
         )
-        lr_logger = LearningRateMonitor(logging_interval="step")
+        # lr_logger = LearningRateMonitor(logging_interval="step")
 
         trainer = pl.Trainer.from_argparse_args(
             argparse_args,
-            callbacks=[lr_logger, checkpoint_callback],
+            callbacks=[checkpoint_callback],  # lr_logger
             deterministic=True,
             accumulate_grad_batches=argparse_args.accumulate_grad_batches,
         )
