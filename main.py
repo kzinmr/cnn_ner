@@ -30,7 +30,7 @@ from seqeval.metrics import (
 )
 from seqeval.scheme import BILOU
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 from torch.utils.data import DataLoader, Dataset
 
 ListStr = List[str]
@@ -890,7 +890,7 @@ class WordSequence(nn.Module):
         pretrain_word_embedding: Optional[np.array] = None,
         gpu: bool = False,
         use_sepcnn_rc: bool = False,
-        use_batchnorm: bool = False,
+        use_batchnorm: bool = True,
     ):
         super(WordSequence, self).__init__()
         print("build word sequence feature extractor: %s..." % (word_feature_extractor))
@@ -2672,17 +2672,17 @@ class TokenClassificationModule(pl.LightningModule):
             weight_decay=self.hparams.weight_decay,
             # amsgrad=False,
         )
-        lr_scheduler = ReduceLROnPlateau(
-            optimizer,
-            mode="min" if self.hparams.monitor == "loss" else "max",
-            factor=self.hparams.anneal_factor,
-            patience=self.hparams.patience,
-            min_lr=1e-5,
-            verbose=True,
-        )
+        # lr_scheduler = ReduceLROnPlateau(
+        #     optimizer,
+        #     mode="min" if self.hparams.monitor == "loss" else "max",
+        #     factor=self.hparams.anneal_factor,
+        #     patience=self.hparams.patience,
+        #     min_lr=1e-5,
+        #     verbose=True,
+        # )
+        lr_scheduler = LambdaLR(optimizer, lr_lambda=[lambda epoch: epoch // 30])
         scheduler = {
             "scheduler": lr_scheduler,
-            "reduce_on_plateau": True,
             "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
         }
         return [optimizer], [scheduler]
