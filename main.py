@@ -1432,11 +1432,11 @@ class Alphabet:
             return self.instance2index["O" if self.label else self.UNKNOWN]
 
     def get_instance(self, index: int) -> str:
-        if index in self.index2instance:
-            return self.index2instance[index]
+        if int(index) in self.index2instance:
+            return self.index2instance[int(index)]
         else:
             print(
-                f"WARNING:Alphabet index {index} is out of {len(self.index2instance)}, return the UNK/O."
+                f"WARNING:Alphabet index {index}({type(index)}) is out of {len(self.index2instance)}, return the UNK/O."
             )
             return self.UNKNOWN
 
@@ -1457,7 +1457,9 @@ class Alphabet:
 
     def from_json(self, data):
         self.index2instance = data["index2instance"]
+        self.index2instance = {int(k): v for k, v in self.index2instance.items()}
         self.instance2index = data["instance2index"]
+        self.instance2index = {k: int(v) for k, v in self.instance2index.items()}
 
     def save(self, output_directory, name=None):
         """
