@@ -946,6 +946,7 @@ class WordSequence(nn.Module):
                     batch_first=True,
                     bidirectional=self.bilstm_flag,
                 )
+            self.hidden2tag = nn.Linear(self.hidden_dim, label_alphabet_size)
         else:  # elif self.word_feature_extractor == "CNN":
             self.cnn_layer = cnn_layer
             print("CNN layer: ", self.cnn_layer)
@@ -1929,8 +1930,6 @@ class TokenClassificationDataModule(pl.LightningDataModule):
         self.number_normalized = hparams.number_normalized
 
         self.data_dir = hparams.data_dir
-        if not os.path.exists(self.data_dir):
-            os.mkdir(self.data_dir)
 
         self.train_batch_size = hparams.train_batch_size
         self.eval_batch_size = hparams.eval_batch_size
@@ -2214,7 +2213,7 @@ class TokenClassificationModule(pl.LightningModule):
             self.gpu = False
             if hparams.model_path.endswith(".pkl"):
                 # model と Alphabet(vocab) をまとめてロード
-                self.model = self._load_pickle(hparams.model_path)
+                self._load_pickle(hparams.model_path)
             else:
                 # NOTE: Fit and save vocab first in DataModule.
                 self.model = self._load_model(
@@ -2774,7 +2773,7 @@ def make_common_args():
     parser.add_argument("--config_path", type=str)  #  default="model/train.config",
     parser.add_argument("--vocab_path", type=str)  # , default="model/"
     parser.add_argument("--nbest", default=1, type=int, help="to be implemented")
-    parser.add_argument("--number-normalized", default=True, type=bool)
+    parser.add_argument("--number_normalized", default=True, type=bool)
     parser.add_argument(
         "--output_dir",
         # default="/app/workspace/models",
@@ -2804,6 +2803,45 @@ def make_common_args():
     return parser
 
 
+def build_args(notebook=False):
+    parser = make_common_args()
+    parser = pl.Trainer.add_argparse_args(parent_parser=parser)
+    parser = TokenClassificationModule.add_model_specific_args(parent_parser=parser)
+    parser = TokenClassificationDataModule.add_model_specific_args(parent_parser=parser)
+    if not notebook:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(args=[])
+    args.delimiter = " "
+    args.is_bio = False
+    if args.download:
+        download_dataset(args.data_dir)
+        args.delimiter = "\t"
+        args.is_bio = True
+    return args
+
+
+def save_pickle_in_module(
+    save_path: str,
+    model_path: str,
+    vocab_path: str,
+    config_path: str,
+    notebook: bool = False,
+):
+    """Save pickle in the current module hierarchy from pytorch model.
+    NOTE: アプリケーションコンテナ内でpickleを実行しないとpickle対象のクラスパスが解決できない。
+    """
+    args = build_args(notebook)
+    args.model_path = model_path
+    args.vocab_path = vocab_path
+    args.config_path = config_path
+    args.do_train = False
+    args.do_predict = True
+    args.gpu = False
+    pl_module = TokenClassificationModule(args)
+    pl_module.save_pickle(save_path)
+
+
 def main_as_plmodule():
     """PyTorch-Lightning Moduleとして訓練・予測を行う"""
 
@@ -2831,24 +2869,17 @@ def main_as_plmodule():
         )
         return trainer, checkpoint_callback
 
-    parser = make_common_args()
-    parser = pl.Trainer.add_argparse_args(parent_parser=parser)
-    parser = TokenClassificationModule.add_model_specific_args(parent_parser=parser)
-    parser = TokenClassificationDataModule.add_model_specific_args(parent_parser=parser)
-    args = parser.parse_args()
-    # args = parser.parse_args(args=[])  # in jupyter notebook
+    # parser = make_common_args()
+    # parser = pl.Trainer.add_argparse_args(parent_parser=parser)
+    # parser = TokenClassificationModule.add_model_specific_args(parent_parser=parser)
+    # parser = TokenClassificationDataModule.add_model_specific_args(parent_parser=parser)
+    # args = parser.parse_args()
+    args = build_args()
     args.gpu = torch.cuda.is_available()
 
     pl.seed_everything(args.seed)
 
     Path(args.output_dir).mkdir(exist_ok=True)
-
-    args.delimiter = " "
-    args.is_bio = False
-    if args.download:
-        download_dataset(args.data_dir)
-        args.delimiter = "\t"
-        args.is_bio = True
 
     dm = TokenClassificationDataModule(args)
     dm.prepare_data()
