@@ -22,15 +22,11 @@ import torch.autograd as autograd
 import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
-from seqeval.metrics import (
-    accuracy_score,
-    f1_score,
-    precision_score,
-    recall_score,
-)
+from seqeval.metrics import accuracy_score
+from seqeval.metrics.v1 import precision_recall_fscore_support
 from seqeval.scheme import BILOU
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
 ListStr = List[str]
@@ -886,11 +882,11 @@ class WordSequence(nn.Module):
         use_char: bool = True,
         use_idcnn: bool = False,
         use_sepcnn: bool = False,
+        use_sepcnn_rc: bool = False,
         use_bilstm: bool = False,
+        use_batchnorm: bool = True,
         pretrain_word_embedding: Optional[np.array] = None,
         gpu: bool = False,
-        use_sepcnn_rc: bool = False,
-        use_batchnorm: bool = True,
     ):
         super(WordSequence, self).__init__()
         print("build word sequence feature extractor: %s..." % (word_feature_extractor))
@@ -1010,12 +1006,12 @@ class WordSequence(nn.Module):
                     self.cnn_drop_list = nn.ModuleList()
                     self.cnn_norm_list = nn.ModuleList()
                     self.dcnn_drop_list = nn.ModuleList()
-                    self.dcnn_batchnorm_list = nn.ModuleList()
+                    self.dcnn_norm_list = nn.ModuleList()
                     self.dilations = [1, 2, 1]
                     for idx in range(self.cnn_layer):
                         dcnn = nn.ModuleList()
                         dcnn_drop = nn.ModuleList()
-                        dcnn_batchnorm = nn.ModuleList()
+                        dcnn_norm = nn.ModuleList()
                         for i, dilation in enumerate(self.dilations):
                             pad_size = self.cnn_kernel // 2 + dilation - 1
                             dcnn.append(
@@ -1028,9 +1024,13 @@ class WordSequence(nn.Module):
                                 )
                             )
                             dcnn_drop.append(nn.Dropout(self.dropout_rate))
-                            dcnn_batchnorm.append(nn.BatchNorm1d(self.hidden_dim))
+                            dcnn_norm.append(
+                                nn.BatchNorm1d(self.hidden_dim)
+                                if self.use_bn
+                                else nn.GroupNorm(1, self.hidden_dim)
+                            )
                         self.dcnn_drop_list.append(dcnn_drop)
-                        self.dcnn_batchnorm_list.append(dcnn_batchnorm)
+                        self.dcnn_norm_list.append(dcnn_norm)
                         self.cnn_list.append(dcnn)
                         self.cnn_drop_list.append(nn.Dropout(self.dropout_rate))
                         self.cnn_norm_list.append(
@@ -1129,9 +1129,9 @@ class WordSequence(nn.Module):
                                 self.dcnn_drop_list[idx][i] = self.dcnn_drop_list[idx][
                                     i
                                 ].cuda()
-                                self.dcnn_batchnorm_list[idx][
+                                self.dcnn_norm_list[idx][i] = self.dcnn_norm_list[idx][
                                     i
-                                ] = self.dcnn_batchnorm_list[idx][i].cuda()
+                                ].cuda()
                             self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
                             self.cnn_norm_list[idx] = self.cnn_norm_list[idx].cuda()
                         elif self.use_sepcnn:
@@ -1221,7 +1221,7 @@ class WordSequence(nn.Module):
                         for i, dilation in enumerate(self.dilations):
                             cnn_feature = F.relu(self.cnn_list[idx][i](cnn_feature))
                             cnn_feature = self.dcnn_drop_list[idx][i](cnn_feature)
-                            cnn_feature = self.dcnn_batchnorm_list[idx][i](cnn_feature)
+                            cnn_feature = self.dcnn_norm_list[idx][i](cnn_feature)
                     elif self.use_sepcnn:
                         cnn_feature = F.relu(self.depthwise_cnn_list[idx](cnn_feature))
                         cnn_feature = self.cnn_drop_list[idx](cnn_feature)
@@ -1268,9 +1268,11 @@ class TokenClassificationModel(nn.Module):
         use_char: bool = True,
         use_idcnn: bool = False,
         use_sepcnn: bool = False,
+        use_sepcnn_rc: bool = False,
         use_bilstm: bool = False,
         use_crf: bool = True,
         average_batch: bool = False,
+        use_batchnorm: bool = True,
         pretrain_word_embedding: Optional[np.array] = None,
         gpu: bool = False,
     ):
@@ -1294,7 +1296,9 @@ class TokenClassificationModel(nn.Module):
             use_char,
             use_idcnn,
             use_sepcnn,
+            use_sepcnn_rc,
             use_bilstm,
+            use_batchnorm,
             pretrain_word_embedding,
             gpu,
         )
@@ -1453,7 +1457,10 @@ class Alphabet:
         self.keep_growing = True
 
     def get_content(self):
-        return {"instance2index": self.instance2index, "index2instance": self.index2instance}
+        return {
+            "instance2index": self.instance2index,
+            "index2instance": self.index2instance,
+        }
 
     def from_json(self, data):
         self.index2instance = data["index2instance"]
@@ -2295,7 +2302,9 @@ class TokenClassificationModule(pl.LightningModule):
             use_char=True,
             use_idcnn=False,
             use_sepcnn=False,
+            use_sepcnn_rc=False,
             use_bilstm=False,
+            use_batchnorm=True,
             use_crf=True,
             gpu=False,
         )
@@ -2311,9 +2320,9 @@ class TokenClassificationModule(pl.LightningModule):
                     params[k] = v
                 else:
                     params[k] = eval(v)
-        params["word_alphabet_size"] = self.word_alphabet.size()  # </unk>
-        params["char_alphabet_size"] = self.char_alphabet.size()  # </unk>
-        params["label_alphabet_size"] = self.label_alphabet.size()  # </unk>
+        params["word_alphabet_size"] = self.word_alphabet.size()  # </pad>,</unk>
+        params["char_alphabet_size"] = self.char_alphabet.size()  # </pad>,</unk>
+        params["label_alphabet_size"] = self.label_alphabet.size()  # </pad>
 
         params["gpu"] = torch.cuda.is_available()
 
@@ -2343,12 +2352,9 @@ class TokenClassificationModule(pl.LightningModule):
         perfect_match = 0
         case_match = 0
         not_match = 0
-        for word, index in self.word_alphabet.items():  # includes </unk>
-            if word == self.word_alphabet.UNKNOWN:
-                # pretrain_emb[0, :] = np.zeros((1, embedd_dim))
-                pretrain_emb[index, :] = np.random.uniform(
-                    -scale, scale, [1, embedd_dim]
-                )
+        for word, index in self.word_alphabet.items():  # includes </pad>,</unk>
+            if word in {self.word_alphabet.UNKNOWN, self.word_alphabet.PAD}:
+                pretrain_emb[0, :] = np.zeros((1, embedd_dim))
             elif word in embedd_dict:
                 pretrain_emb[index, :] = embedd_dict[word]
                 perfect_match += 1
@@ -2392,7 +2398,7 @@ class TokenClassificationModule(pl.LightningModule):
         batch_size = mask.shape[0]
         return [
             [
-                self.word_alphabet.get_instance(word_ids[idx][idy])  # </unk>
+                self.word_alphabet.get_instance(word_ids[idx][idy])
                 for idy in range(seq_len)
                 if mask[idx][idy] != 0
             ]
@@ -2549,24 +2555,19 @@ class TokenClassificationModule(pl.LightningModule):
         return words, pred_label, gold_label
 
     def eval_f1(self, outputs):
-        preds_list = np.concatenate([x["prediction"] for x in outputs], axis=0)
-        target_list = np.concatenate([x["target"] for x in outputs], axis=0)
+        preds_list = [p for x in outputs for p in x["prediction"]]
+        target_list = [p for x in outputs for p in x["target"]]
         accuracy = accuracy_score(target_list, preds_list)
-        precision = precision_score(
-            target_list, preds_list, mode="strict", scheme=BILOU
+        p, r, f, s = precision_recall_fscore_support(
+            target_list, preds_list, scheme=BILOU, average="micro"
         )
-        recall = recall_score(target_list, preds_list, mode="strict", scheme=BILOU)
-        f1 = f1_score(target_list, preds_list, mode="strict", scheme=BILOU)
-        support = preds_list.shape[0]
-        return accuracy, precision, recall, f1, support
+        return accuracy, p, r, f, s
 
     def training_step(
         self, train_batch: TokenClassificationBatch, batch_idx
     ) -> Dict[str, torch.Tensor]:
         loss = self.calculate_loss(train_batch)
         self.log("train_loss", loss, prog_bar=True)
-        # right, whole = predict_check(tag_seq, batch_label, mask, data.sentence_classification)
-        # self.log("acc: %s/%s=%.4f", (sample_loss, right, whole,(right+0.)/whole))
         return {"loss": loss}
 
     def validation_step(
@@ -2648,7 +2649,7 @@ class TokenClassificationModule(pl.LightningModule):
             },
         ]
 
-        optimizer = torch.optim.Adam(
+        optimizer = torch.optim.AdamW(
             optimizer_grouped_parameters,
             lr=self.hparams.learning_rate,
             eps=self.hparams.adam_epsilon,
@@ -2656,23 +2657,19 @@ class TokenClassificationModule(pl.LightningModule):
             weight_decay=self.hparams.weight_decay,
             # amsgrad=False,
         )
-        # lr_scheduler = ReduceLROnPlateau(
-        #     optimizer,
-        #     mode="min" if self.hparams.monitor == "loss" else "max",
-        #     factor=self.hparams.anneal_factor,
-        #     patience=self.hparams.patience,
-        #     min_lr=1e-5,
-        #     verbose=True,
-        # )
-        # lr_scheduler = LambdaLR(
-        #     optimizer,
-        #     lr_lambda=[lambda epoch: epoch // 30, lambda epoch: 0.95 ** epoch],
-        # )
-        # scheduler = {
-        #     "scheduler": lr_scheduler,
-        #     "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
-        # }
-        return [optimizer], []
+        lr_scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode="min" if self.hparams.monitor == "loss" else "max",
+            factor=self.hparams.anneal_factor,
+            patience=self.hparams.patience,
+            min_lr=1e-5,
+            verbose=True,
+        )
+        scheduler = {
+            "scheduler": lr_scheduler,
+            "monitor": "val_loss" if self.hparams.monitor == "loss" else "val_f1",
+        }
+        return [optimizer], [scheduler]
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -2840,32 +2837,26 @@ def main_as_plmodule():
         # early_stopping = EarlyStopping(monitor="val_loss", mode="min", verbose=True)
         checkpoint_callback = ModelCheckpoint(
             dirpath=argparse_args.output_dir,
-            filename="checkpoint-{epoch}-{val_loss:.2f}",
+            filename="checkpoint-{epoch}-{val_f1:.2f}",
             save_top_k=10,
             verbose=True,
             monitor="val_loss" if argparse_args.monitor == "loss" else "val_f1",
             mode="min" if argparse_args.monitor == "loss" else "max",
         )
-        # lr_logger = LearningRateMonitor(logging_interval="step")
+        lr_logger = LearningRateMonitor(logging_interval="step")
 
         trainer = pl.Trainer.from_argparse_args(
             argparse_args,
-            callbacks=[checkpoint_callback],  # lr_logger
+            callbacks=[lr_logger, checkpoint_callback],
             deterministic=True,
             accumulate_grad_batches=argparse_args.accumulate_grad_batches,
         )
         return trainer, checkpoint_callback
 
-    # parser = make_common_args()
-    # parser = pl.Trainer.add_argparse_args(parent_parser=parser)
-    # parser = TokenClassificationModule.add_model_specific_args(parent_parser=parser)
-    # parser = TokenClassificationDataModule.add_model_specific_args(parent_parser=parser)
-    # args = parser.parse_args()
     args = build_args()
     args.gpu = torch.cuda.is_available()
 
     pl.seed_everything(args.seed)
-
     Path(args.output_dir).mkdir(exist_ok=True)
 
     dm = TokenClassificationDataModule(args)
@@ -2882,15 +2873,13 @@ def main_as_plmodule():
 
         trainer.test(ckpt_path=checkpoint_callback.best_model_path)
         # save best model
-        # logger.info("Best checkpoint path: {}".format(checkpoint_callback.best_model_path))
-        # logger.info("Best score(val loss): {}".format(checkpoint_callback.best_model_score))
         best_model = TokenClassificationModule.load_from_checkpoint(
             checkpoint_callback.best_model_path
         )
         save_path = Path(checkpoint_callback.best_model_path).parent / "best_model.pt"
         torch.save(best_model.model.state_dict(), save_path)
-        save_path = Path(checkpoint_callback.best_model_path).parent / "best_model.pkl"
-        best_model.save_pickle(save_path)
+        # save_path = Path(checkpoint_callback.best_model_path).parent / "best_model.pkl"
+        # best_model.save_pickle(save_path)
     elif args.do_predict:
         if args.model_path.endswith(".ckpt"):
             ## NOTE: the path structure on training is pickled in .ckpt
