@@ -1667,31 +1667,18 @@ class TokenClassificationDataset(Dataset):
         self.normalized_number = "0"
 
         self.tokens_per_batch = tokens_per_batch
-        self.window_stride = window_stride
-        if window_stride is None:
-            self.window_stride = tokens_per_batch
-        else:
-            assert window_stride <= tokens_per_batch
-        # elif window_stride > tokens_per_batch:
-        #     logger.error(
-        #         "window_stride must be smaller than tokens_per_batch(max_seq_length)"
-        #     )
-        # else:
-        #     logger.warning(
-        #         """window_stride != tokens_per_batch:
-        #     The input data windows are overlapping. Merge the overlapping labels after processing InputFeatures.
-        #     """
-        #     )
-
+        self.window_stride = tokens_per_batch
+        if window_stride is not None:
+            if window_stride > 0 and window_stride <= tokens_per_batch:
+                self.window_stride = window_stride
         # segment input text into blocks of `tokens_per_batch` tokens
-        # TODO: window_stride
         token_blocks = [
             [
                 InputExample(
                     example.words[st : st + self.tokens_per_batch],
-                    example.labels[st : st + self.tokens_per_batch],
+                    self._fix_boundary_labels(example.labels[st : st + self.tokens_per_batch]),
                 )
-                for st in range(0, len(example.labels), self.tokens_per_batch)
+                for st in range(0, len(example.labels), self.window_stride)
             ]
             for example in self.examples
         ]
@@ -1745,9 +1732,7 @@ class TokenClassificationDataset(Dataset):
                 char_Id = [self.char_alphabet.get_index(char) for char in char_list]
                 chars.append(char_list)
                 char_Ids.append(char_Id)
-
-            # for s in range(0, len(words), self.max_sent_length):
-            #     # NOTE: no padding for words
+            # NOTE: no padding for words
             instence_texts.append(
                 FeatureExample(
                     words,
@@ -1768,6 +1753,41 @@ class TokenClassificationDataset(Dataset):
         self.features = instence_Ids
 
         self._n_features = len(self.features)
+
+    def _fix_boundary_labels(self, labels) -> ListStr:
+        """
+        assert _fix_boundary_labels(['I-X', 'L-X', 'O']) == ['O', 'O', 'O']
+        assert _fix_boundary_labels(['L-X', 'O']) == ['O', 'O']
+        assert _fix_boundary_labels(['O', 'B-X', 'I-X']) == ['O', 'O', 'O']
+        assert _fix_boundary_labels(['O', 'B-X']) == ['O', 'O']
+        """
+        if not labels:
+            return labels
+        else:
+            # fix head boundary
+            if labels[0].startswith('L-'):
+                labels[0] = 'O'
+            elif labels[0].startswith('I-'):
+                _until = 0
+                for i in range(1, len(labels)):
+                    if labels[i].startswith('L-'):
+                        _until = i + 1
+                        break
+                for i in range(0, _until):
+                    labels[i] = 'O'
+            # fix tail boundary
+            if labels[-1].startswith('B-'):
+                labels[-1] = 'O'
+            elif labels[-1].startswith('I-'):
+                _from = -1
+                for i in range(2, len(labels)+1):
+                    if labels[-i].startswith('B-'):
+                        _from = -i
+                        break
+                for i in range(_from, 0, 1):
+                    labels[i] = 'O'
+            return labels
+
 
     def __len__(self):
         return self._n_features
@@ -1916,7 +1936,7 @@ class TokenClassificationDataModule(pl.LightningDataModule):
         self.do_predict = hparams.do_predict
 
         self.tokens_per_batch = hparams.tokens_per_batch
-        self.window_stride = None
+        self.window_stride = hparams.window_stride
         self.number_normalized = hparams.number_normalized
 
         self.data_dir = hparams.data_dir
@@ -2161,6 +2181,13 @@ class TokenClassificationDataModule(pl.LightningDataModule):
             type=int,
             help="The maximum total input sequence length after tokenization. Sequences longer "
             "than this will be truncated, sequences shorter will be padded.",
+        )
+        parser.add_argument(
+            "--window_stride",
+            default=125,
+            type=int,
+            help="The stride of moving window over input sequence."
+            "This must be shorter than tokens_per_batch.",
         )
         parser.add_argument(
             "--num_samples",
