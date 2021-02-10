@@ -25,6 +25,7 @@ RUN apt-get update -y && apt-get install -y \
     g++ \
     mecab \
     libmecab-dev \
+    mecab-ipadic-utf8 \
     python3-pip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

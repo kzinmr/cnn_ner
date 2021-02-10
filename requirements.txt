@@ -1,8 +1,8 @@
 pytorch_lightning==1.1.0
 seqeval==1.2.2
 requests
-mecab-python3
-ipadic
+mecab-python3==0.7
+# ipadic
 tqdm
 pandas
 # sklearn_crfsuite
