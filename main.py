@@ -2938,12 +2938,13 @@ def main_as_plmodule():
         trainer.fit(model, dm)
 
         trainer.test(ckpt_path=checkpoint_callback.best_model_path)
-        # save best model
-        best_model = TokenClassificationModule.load_from_checkpoint(
-            checkpoint_callback.best_model_path
-        )
-        save_path = Path(checkpoint_callback.best_model_path).parent / "best_model.pt"
-        torch.save(best_model.model.state_dict(), save_path)
+
+        # # save best model
+        # best_model = TokenClassificationModule.load_from_checkpoint(
+        #     checkpoint_callback.best_model_path
+        # )
+        # save_path = Path(checkpoint_callback.best_model_path).parent / "best_model.pt"
+        # torch.save(best_model.model.state_dict(), save_path)
         # save_path = Path(checkpoint_callback.best_model_path).parent / "best_model.pkl"
         # best_model.save_pickle(save_path)
     elif args.do_predict:
