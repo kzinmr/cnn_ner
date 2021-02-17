@@ -2252,9 +2252,9 @@ class TokenClassificationModule(pl.LightningModule):
         with open(self.train_loss_log, 'w') as fp:
             fp.write('PRECISION,RECALL,F1')
             fp.write('\n')
-        # with open(self.dev_loss_log, 'w') as fp:
-        #     fp.write('PRECISION,RECALL,F1')
-        #     fp.write('\n')
+        with open(self.dev_loss_log, 'w') as fp:
+            fp.write('PRECISION,RECALL,F1')
+            fp.write('\n')
         with open(self.test_loss_log, 'w') as fp:
             fp.write('PRECISION,RECALL,F1')
             fp.write('\n')
