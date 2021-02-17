@@ -2924,11 +2924,12 @@ def main_as_plmodule():
 
     pl.seed_everything(args.seed)
     Path(args.output_dir).mkdir(exist_ok=True)
-
+    print(f"Building dataset...")
     dm = TokenClassificationDataModule(args)
     dm.prepare_data()
 
     if args.do_train:
+        print(f"Start training...")
         dm.setup(stage="fit")
         # mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
         # mlflow.set_experiment("cnn-ner")
@@ -2982,7 +2983,7 @@ def main_as_plmodule():
                 dl = dm.get_prediction_dataloader(texts)
                 fexamples = dm.dataset.fexamples
 
-            print(f"Start Prediction...")
+            print(f"Start prediction...")
             time_start = time.time()
 
             prediction_batch = [
