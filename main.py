@@ -1946,7 +1946,7 @@ class TokenClassificationDataModule(pl.LightningDataModule):
         self.num_workers = hparams.num_workers
         self.num_samples = hparams.num_samples
 
-        self.vocab_path = hparams.vocab_path
+        self.vocab_path = hparams.model_dir
 
         self.delimiter = hparams.delimiter
         self.is_bio = hparams.is_bio
@@ -2216,11 +2216,12 @@ class TokenClassificationModule(pl.LightningModule):
         # Enable to access arguments via self.hparams
         self.save_hyperparameters(hparams)
 
+        vocab_path = hparams.model_dir
         if hparams.do_train:
             self.gpu = hparams.gpu
             # NOTE: Fit and save vocab first in DataModule.
             self.model = self._load_model(
-                hparams.vocab_path,
+                vocab_path,
                 hparams.config_path,
                 pretrain_embed_path=hparams.pretrain_embed_path,
             )
@@ -2235,7 +2236,7 @@ class TokenClassificationModule(pl.LightningModule):
             else:
                 # NOTE: Fit and save vocab first in DataModule.
                 self.model = self._load_model(
-                    hparams.vocab_path,
+                    vocab_path,
                     hparams.config_path,
                     model_path=hparams.model_path,
                 )
@@ -2244,9 +2245,9 @@ class TokenClassificationModule(pl.LightningModule):
         self.model_path: str = hparams.model_path
         self.nbest = hparams.nbest  # TODO: to be implemented
         # self.show_model_summary()
-        self.train_loss_log = os.path.join(self.model_path, 'train_loss.csv')
-        self.dev_loss_log = os.path.join(self.model_path, 'dev_loss.csv')
-        self.test_loss_log = os.path.join(self.model_path, 'test_loss.csv')
+        self.train_loss_log = os.path.join(self.model_dir, 'train_loss.csv')
+        self.dev_loss_log = os.path.join(self.model_dir, 'dev_loss.csv')
+        self.test_loss_log = os.path.join(self.model_dir, 'test_loss.csv')
         self.loss_log_format = '{},{},{}'
         with open(self.train_loss_log, 'w') as fp:
             fp.write('PRECISION,RECALL,F1')
@@ -2820,7 +2821,7 @@ def make_common_args():
     parser = argparse.ArgumentParser(description="CharCNN-NER module from NCRF++")
     parser.add_argument("--model_path", type=str)  #  default="model/cnn.0.model",
     parser.add_argument("--config_path", type=str)  #  default="model/train.config",
-    parser.add_argument("--vocab_path", type=str)  # , default="model/"
+    parser.add_argument("--model_dir", type=str)  # , default="model/"
     parser.add_argument("--nbest", default=1, type=int, help="to be implemented")
     parser.add_argument("--number_normalized", default=True, type=bool)
     parser.add_argument(

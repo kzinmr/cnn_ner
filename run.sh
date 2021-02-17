@@ -10,7 +10,7 @@ python3 main.py \
 --max_epochs=150 \
 --output_dir="/app/workspace/output/" \
 --config_path="/app/workspace/models/train.config" \
---vocab_path="/app/workspace/models/" \
+--model_dir="/app/workspace/models/" \
 --monitor="f1" \
 --monitor_training \
 --do_train
