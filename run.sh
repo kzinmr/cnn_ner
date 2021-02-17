@@ -7,11 +7,12 @@ python3 main.py \
 --weight_decay=0.05 \
 --anneal_factor=0.5 \
 --patience=10 \
---monitor="f1" \
 --max_epochs=150 \
 --output_dir="/app/workspace/output/" \
 --config_path="/app/workspace/models/train.config" \
 --vocab_path="/app/workspace/models/" \
+--monitor="f1" \
+--monitor_training \
 --do_train
 #  \
 # --gpus=1

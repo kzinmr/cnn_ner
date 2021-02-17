@@ -2244,6 +2244,19 @@ class TokenClassificationModule(pl.LightningModule):
         self.model_path: str = hparams.model_path
         self.nbest = hparams.nbest  # TODO: to be implemented
         # self.show_model_summary()
+        self.train_loss_log = os.path.join(self.model_path, 'train_loss.csv')
+        self.dev_loss_log = os.path.join(self.model_path, 'dev_loss.csv')
+        self.test_loss_log = os.path.join(self.model_path, 'test_loss.csv')
+        self.loss_log_format = '{},{},{}'
+        with open(self.train_loss_log, 'w') as fp:
+            fp.write('PRECISION,RECALL,F1')
+            fp.write('\n')
+        with open(self.dev_loss_log, 'w') as fp:
+            fp.write('PRECISION,RECALL,F1')
+            fp.write('\n')
+        with open(self.test_loss_log, 'w') as fp:
+            fp.write('PRECISION,RECALL,F1')
+            fp.write('\n')
 
     def _load_model(
         self,
@@ -2581,13 +2594,19 @@ class TokenClassificationModule(pl.LightningModule):
         )
         return words, pred_label, gold_label
 
-    def eval_f1(self, outputs):
+    def eval_f1(self, outputs, output_file=None):
         preds_list = [p for x in outputs for p in x["prediction"]]
         target_list = [p for x in outputs for p in x["target"]]
         accuracy = accuracy_score(target_list, preds_list)
         p, r, f, s = precision_recall_fscore_support(
             target_list, preds_list, scheme=BILOU, average="micro"
         )
+
+        if output_file is not None and os.path.exists(output_file):
+            with open(output_file, 'a') as fp:
+                fp.write(self.loss_log_format.format(p,r,f))
+                fp.write('\n')
+
         return accuracy, p, r, f, s
 
     def training_step(
@@ -2595,7 +2614,24 @@ class TokenClassificationModule(pl.LightningModule):
     ) -> Dict[str, torch.Tensor]:
         loss = self.calculate_loss(train_batch)
         self.log("train_loss", loss, prog_bar=True)
-        return {"loss": loss}
+        if self.hparams.monitor_training:
+            words, pred_label, gold_label = self.predict(train_batch)
+            return {
+                "loss": loss,
+                "target": gold_label,
+                "prediction": pred_label,
+            }
+        else:
+            return {"loss": loss}
+
+    def training_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
+        if self.hparams.monitor_training:
+            accuracy, precision, recall, f1, support = self.eval_f1(outputs, self.train_loss_log)
+            self.log("train_accuracy", accuracy)
+            self.log("train_precision", precision)
+            self.log("train_recall", recall)
+            self.log("train_f1", f1)
+            self.log("train_support", support)
 
     def validation_step(
         self, val_batch: TokenClassificationBatch, batch_idx
@@ -2615,7 +2651,7 @@ class TokenClassificationModule(pl.LightningModule):
             avg_loss = torch.stack([x["val_step_loss"] for x in outputs]).mean()
             self.log("val_loss", avg_loss, sync_dist=True)
         else:
-            accuracy, precision, recall, f1, support = self.eval_f1(outputs)
+            accuracy, precision, recall, f1, support = self.eval_f1(outputs, self.dev_loss_log)
             self.log("val_accuracy", accuracy)
             self.log("val_precision", precision)
             self.log("val_recall", recall)
@@ -2635,8 +2671,7 @@ class TokenClassificationModule(pl.LightningModule):
         }
 
     def test_epoch_end(self, outputs: List[Dict[str, torch.Tensor]]):
-        accuracy, precision, recall, f1, support = self.eval_f1(outputs)
-
+        accuracy, precision, recall, f1, support = self.eval_f1(outputs, self.test_loss_log)
         self.log("test_accuracy", accuracy)
         self.log("test_precision", precision)
         self.log("test_recall", recall)
@@ -2772,6 +2807,9 @@ class TokenClassificationModule(pl.LightningModule):
             type=str,
             help="what metrics to monitor(loss/f1)",
         )
+        parser.add_argument(
+            "--monitor_training", action="store_true", help="Whether to monitor train metrics."
+        )        
         parser.add_argument("--use_crf", action="store_true")
         parser.add_argument("--use_char", action="store_true")
         parser.add_argument("--use_idcnn", action="store_true")
