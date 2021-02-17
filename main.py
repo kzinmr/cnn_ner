@@ -2248,13 +2248,13 @@ class TokenClassificationModule(pl.LightningModule):
         self.train_loss_log = os.path.join(hparams.model_dir, 'train_loss.csv')
         self.dev_loss_log = os.path.join(hparams.model_dir, 'dev_loss.csv')
         self.test_loss_log = os.path.join(hparams.model_dir, 'test_loss.csv')
-        self.loss_log_format = '{},{},{}'
+        self.loss_log_format = '{:.05},{:.05},{:.05}'
         with open(self.train_loss_log, 'w') as fp:
             fp.write('PRECISION,RECALL,F1')
             fp.write('\n')
-        with open(self.dev_loss_log, 'w') as fp:
-            fp.write('PRECISION,RECALL,F1')
-            fp.write('\n')
+        # with open(self.dev_loss_log, 'w') as fp:
+        #     fp.write('PRECISION,RECALL,F1')
+        #     fp.write('\n')
         with open(self.test_loss_log, 'w') as fp:
             fp.write('PRECISION,RECALL,F1')
             fp.write('\n')
